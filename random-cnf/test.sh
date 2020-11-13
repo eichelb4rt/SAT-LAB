@@ -11,6 +11,7 @@ out="out"
 
 i=0
 while [ "$i" -lt "$t" ]; do
+    echo $(basename "./$out/random_cnf_$i.txt") 
     ./lingeling/lingeling "./$out/random_cnf_$i.txt" | grep SATIS
     ((++i))
 done
