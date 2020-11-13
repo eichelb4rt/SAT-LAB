@@ -2,6 +2,7 @@
 # SHEBANG
 
 import os
+import sys
 import random
 import argparse
 import numpy as np
@@ -42,6 +43,15 @@ def main():
         help = 'Directory that the CNFs are written to'
     )
     args = parser.parse_args()
+
+    # check if arguments are viable
+    if args.k > args.n:
+        sys.stderr.write("Clauses cannot be wider than the number of variables\n")    # assuming there aren't any tautologies
+        sys.exit(1)
+    if args.c > 2**args.k:
+        sys.stderr.write("CNF cannot have more than 2^k clauses\n")
+        sys.exit(1)
+
     # make the output directory if not existent
     try:
         os.mkdir(args.output)
@@ -65,14 +75,12 @@ def encode_cnf(n: int, c: int, k: int, cnf: List[List[int]]) -> str:
     ----------
     n : int
         Number of variables.
-    
     c : int
         Number of clauses.
-
     k : int
         Clause width.
-    
     cnf : List[List[int]]
+        The CNF.
 
     Returns
     -------
@@ -99,7 +107,6 @@ def encode_clause(clause: List[int]) -> str:
         Returns the encoded clause.
     """
 
-    #print("".join([f"{literal} " for literal in clause]) + "0")
     return "".join([f"{literal} " for literal in clause]) + "0"   # add a space after aech literal and finish with a 0
 
 def gen_cnf(n: int, c: int, k: int) -> List[List[int]]:
