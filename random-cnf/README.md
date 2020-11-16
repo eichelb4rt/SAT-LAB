@@ -1,4 +1,4 @@
-´´´
+```
 usage: random-cnf.py [-h] [-o output_dir] t n c k
 
 positional arguments:
@@ -11,5 +11,4 @@ optional arguments:
   -h, --help            show this help message and exit
   -o output_dir, --output output_dir
                         Directory that the CNFs are written to
-                        
-´´´
+```
