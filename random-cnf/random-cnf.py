@@ -48,8 +48,8 @@ def main():
     if args.k > args.n:
         sys.stderr.write("Clauses cannot be wider than the number of variables\n")    # assuming there aren't any tautologies
         sys.exit(1)
-    if args.c > 2**args.k:
-        sys.stderr.write("CNF cannot have more than 2^k clauses\n")
+    if args.c > 2**args.n:
+        sys.stderr.write("CNF cannot have more than 2^n clauses\n")
         sys.exit(1)
 
     # make the output directory if not existent

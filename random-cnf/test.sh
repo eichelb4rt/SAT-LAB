@@ -1,10 +1,10 @@
 #!/bin/bash
 # SHEBANG
 
-t=200
-n=5
-c=31
-k=5
+t=20
+n=3
+c=3
+k=1
 out="out"
 lingeling="./lingeling/lingeling"
 
