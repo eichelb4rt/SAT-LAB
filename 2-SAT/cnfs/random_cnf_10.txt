@@ -1,0 +1,4 @@
+c random cnf
+p cnf 4 2
+1 -4 0
+1 -2 0
