@@ -1,4 +1,3 @@
-import read_dimacs as dimacs
 #!/bin/python3
 # SHEBANG
 
@@ -7,6 +6,7 @@ import sys
 import random
 import argparse
 import numpy as np
+import read_dimacs as dimacs
 from typing import List, Tuple
 
 def main():
