@@ -8,7 +8,6 @@ import random
 import argparse
 import tracemalloc
 import numpy as np
-from copy import deepcopy
 import read_dimacs as dimacs
 from tabulate import tabulate
 from typing import List, Tuple
@@ -42,8 +41,8 @@ def main():
         help = 'Show the stats (memory usage, time).'
     )
     args = parser.parse_args()
-    with open(args.input, "r") as new_f:
-        formula = dimacs.read_cnf(new_f.readlines())
+    with open(args.input, "r") as f:
+        formula = dimacs.read_cnf(f.readlines())
     for clause in formula:
         # check if it follows the rules like a good boi
         if len(clause) > 2:
@@ -114,7 +113,7 @@ def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
         new_f, new_assignments = unit_propagation(f, (var, False))
         if empty_set_contained(new_f):  # empty set is contained
             # assign 1 to the var
-            new_f, new_assignments = unit_propagation(f, (var, True))
+            new_f, new_assignments = unit_propagation(f, (var, False))
             if empty_set_contained(new_f):
                 return False, None
         f = new_f
@@ -163,7 +162,7 @@ def empty_set_contained(f: List[List[int]]) -> bool:
             return True
     return False
 
-def unit_propagation(f, assignment: Tuple[int, bool]) -> (List[List[int]], List[Tuple[int, bool]]):
+def unit_propagation(f: List[List[int]], assignment: Tuple[int, bool]) -> (List[List[int]], List[Tuple[int, bool]]):
     """Applies the assignment plus unit propagation to the given formula.
 
     Parameters
@@ -179,8 +178,6 @@ def unit_propagation(f, assignment: Tuple[int, bool]) -> (List[List[int]], List[
         The given formula with the assignment assigned plus unit propagation and the assignment itself.
     """
 
-    # deep copy as we don't want to change f or the clauses in f
-    f = deepcopy(f)
     # apply the given assignment
     assignments = [assignment]  # add it to the list of assignments
     f = apply_assignment(f, assignment)
@@ -217,7 +214,7 @@ def find_unit_clause(f: List[List[int]]) -> int:
             return clause[0]
     return None
 
-def apply_assignment(f, assignment: Tuple[int, bool]) -> List[List[int]]:
+def apply_assignment(f: List[List[int]], assignment: Tuple[int, bool]) -> List[List[int]]:
     """Applies the given assignment to the given formula f.
 
     Parameters
@@ -233,8 +230,6 @@ def apply_assignment(f, assignment: Tuple[int, bool]) -> List[List[int]]:
         The given formula where the assignment is applied.
     """
 
-    # deep copy as we don't want to change f or the clauses in f
-    f = deepcopy(f)
     # now to define what literals remove a clause from the formula or the literal from the clause if contained
     var = assignment[0]
     assigned_value = assignment[1]
@@ -251,7 +246,7 @@ def apply_assignment(f, assignment: Tuple[int, bool]) -> List[List[int]]:
                 # remove the literal
                 f[i].remove(removes_literal_from_clause)
                 edited_formula = True
-                break   # we have to break here, as otherwise it would skip some clauses, because of the way list iterations work in python
+                break   # we have to break here, as otherwise it would skip some clauses, because the way list iterations work in python
             elif removes_clause_from_formula in clause: # elif because the cases are mutually exclusive
                 # remove the clause
                 f.remove(clause)

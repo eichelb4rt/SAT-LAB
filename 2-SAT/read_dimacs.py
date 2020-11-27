@@ -77,10 +77,6 @@ def read_cnf(dimacs: List[str]) -> List[List[int]]:
     except Exception:
         raise SyntaxError("This is not a DIMACS encoded formula.")
     
-    # check if it's 2-SAT
-    if c != 2:
-        raise SyntaxError("This is not a 2-SAT.")
-    
     # build the cnf
     cnf = []
     for line_number, clause_dimacs in enumerate(dimacs[start_index+1:]):   # clauses come after the first line
