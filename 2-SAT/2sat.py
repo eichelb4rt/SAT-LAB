@@ -241,22 +241,13 @@ def apply_assignment(f, assignment: Tuple[int, bool]) -> List[List[int]]:
     removes_literal_from_clause = -1 * var if assigned_value == True else var   # == True just for readability, ik i don't need it
     removes_clause_from_formula = -1 * var if assigned_value == False else var    # same here
 
-    # now remove the things
-    edited_formula = True   # to start the loop
-    # we're done if we haven't edited any clauses or removed any from the formula
-    while edited_formula:
-        edited_formula = False  # never set to True if nothing is edited
-        for i, clause in enumerate(f):
-            if removes_literal_from_clause in clause:
-                # remove the literal
+    # first remove clauses
+    f = [clause for clause in f if not removes_clause_from_formula in clause]   # that's all the clauses that do not contain the literal that removes them from the formula
+    # then remove literals from clauses
+    for i, clause in enumerate(f):
+        if removes_literal_from_clause in clause:
                 f[i].remove(removes_literal_from_clause)
-                edited_formula = True
-                break   # we have to break here, as otherwise it would skip some clauses, because of the way list iterations work in python
-            elif removes_clause_from_formula in clause: # elif because the cases are mutually exclusive
-                # remove the clause
-                f.remove(clause)
-                edited_formula = True
-                break
+    # we're done
     return f
 
 if __name__ == "__main__":
