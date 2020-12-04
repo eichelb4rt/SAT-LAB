@@ -24,7 +24,7 @@ def main():
         metavar = 'input',
         dest = 'input',
         type = str,
-        help = 'Input file where DIMACS notation of a formular is stored.'
+        help = 'Input file where DIMACS notation of a formula is stored.'
     )
     parser.add_argument(
         '--show-assignments',
@@ -110,11 +110,11 @@ def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
     while var := get_var(f):  # while vars(f) != empty set
         # decision time - gotta count it
         number_of_decisions -=- 1 # cooler than +=
-        # assign 0 to the var
-        new_f, new_assignments = unit_propagation(f, (var, False))
+        # assign 0 to the var and propagate
+        new_f, new_assignments = unit_propagation(apply_assignment(f, (var, False)))
         if empty_set_contained(new_f):  # empty set is contained
             # assign 1 to the var
-            new_f, new_assignments = unit_propagation(f, (var, True))
+            new_f, new_assignments = unit_propagation(apply_assignment(f, (var, True)))
             if empty_set_contained(new_f):
                 return False, None
         f = new_f
@@ -163,27 +163,24 @@ def empty_set_contained(f: List[List[int]]) -> bool:
             return True
     return False
 
-def unit_propagation(f, assignment: Tuple[int, bool]) -> (List[List[int]], List[Tuple[int, bool]]):
-    """Applies the assignment plus unit propagation to the given formula.
+def unit_propagation(f) -> (List[List[int]], List[Tuple[int, bool]]):
+    """Applies unit propagation to the given formula.
 
     Parameters
     ----------
     f : List[List[int]]
         The given formula.
-    assignment : Tuple[int, bool]
-        A variable and the assigned boolean.
 
     Returns
     -------
     (List[List[int]], List[Tuple[int, bool])
-        The given formula with the assignment assigned plus unit propagation and the assignment itself.
+        The given formula with unit propagation applied and the assignments that were propagated.
     """
 
     # deep copy as we don't want to change f or the clauses in f
     f = deepcopy(f)
     # apply the given assignment
-    assignments = [assignment]  # add it to the list of assignments
-    f = apply_assignment(f, assignment)
+    assignments = []  # add it to the list of assignments
 
     # propagate
     global number_of_propagations
