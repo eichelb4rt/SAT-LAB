@@ -1,24 +1,18 @@
 #!/bin/python3
 # SHEBANG
 
-import os, sys, time, argparse, tracemalloc
+import os, sys, argparse
 from copy import deepcopy, copy
 from typing import List, Tuple, Optional
-from tabulate import tabulate
 
-# add the global_libs directory for general functionality
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
-import read_dimacs as dimacs
-from stats import DPLLStats, StatsAgent
-# add 2-SAT directory for unit propagation and application of assignments
+# add the 2-SAT directory to the path so i can import read_dimacs and more already existing features from it
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}2-SAT")
+import read_dimacs as dimacs    # no vscode, you're wrong. This is not an unresolved import. fucker.
 from two_sat import unit_propagation, apply_assignment
 
-# global variables the algorithm uses
+# global variables
 assignments = []
 original_formula = []
-# global variables for stats
-STATS = DPLLStats()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -48,25 +42,7 @@ def main():
         formula = dimacs.read_cnf(f.readlines())
     global original_formula, assignments
     original_formula = formula
-    # solve and measure stuff
-    if args.show_stats:
-        STATS.start()
-    # now finally do the thing
-    satisfiable = dpll_solver()
-    # stop measuring of stats
-    if args.show_stats:
-        STATS.stop()
-    # print results
-    if satisfiable:
-        print("Satisfiable")
-        if args.show_assignments:
-            print(f"Assignments:\n{assignments}")
-    else:
-        print("Unsatisfiable")
-    
-    # print stats
-    if args.show_stats:
-        print(STATS)
+    print(dpll_solver(), assignments)
 
 def dpll_solver() -> bool:
     """DPLL with preprocessing.
@@ -94,10 +70,10 @@ def dpll_mf() -> bool: # mf = memory friendly, obviously
     bool
         True if the global formula is satisfiable, false if not.
     """
-    global assignments, original_formula, STATS   # we're using these global variables
+    global assignments, original_formula    # we're using these global variables
     unit_propagation_mf()   # unit propagation
     eliminate_pure_literals_mf()    # eliminate pure literals
-    # check for TERMINATION by Arnold Schwarzenegger
+    # check for TERMINATION
     if is_empty_formula_mf():
         return True
     if empty_set_contained_mf():
@@ -107,13 +83,11 @@ def dpll_mf() -> bool: # mf = memory friendly, obviously
     # recursion go brr
     entry_point = len(assignments)  # entry point is the index of the next variable to be assigned
     assignments.append((var, False))    # assign(var, 0)
-    STATS.decide()  # we decided something and we're gonna stick with it!
     if dpll_mf():
         return True
     assignments = assignments[:entry_point] # unassign(x)
     # ite, let's just try it again, shall we?
     assignments.append((var, True))    # assign(var, 1)
-    STATS.decide()  # ok maybe we won't stick with all of our decisions
     if dpll_mf():
         return True
     assignments = assignments[:entry_point] # unassign(x)
@@ -148,9 +122,9 @@ def unit_propagation_mf():  # mf = memory friendly, obviously
     """Applies unit propagation and adds the assigned assignments to the global list of assignments.
     """
 
-    global original_formula, assignments, STATS # gonna use em both like every time
+    global original_formula, assignments    # gonna use em both like every time
     local_formula = apply_assignments(original_formula, assignments)    # apply assignments (uses a deep copy)
-    new_assignments = unit_propagation(local_formula, STATS)[1] # do UP on the local formula - gotta pass our own stats agent
+    new_assignments = unit_propagation(local_formula)[1]    # do UP on the local formula
     for new_assignment in new_assignments:  # append the assignments assigned in UP
         assignments.append(new_assignment)
 

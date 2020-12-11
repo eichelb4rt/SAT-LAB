@@ -7,16 +7,16 @@ import time
 import random
 import argparse
 import tracemalloc
-import numpy as np
 from copy import deepcopy
-import read_dimacs as dimacs
 from tabulate import tabulate
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+# add the global_libs directory for general functionality
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
+import read_dimacs as dimacs
+from stats import TwoSatStats, StatsAgent
 
-# decided to go with global variables because returning these sums through the whole structure 
-# of functions would lead to unnecessarily complicated return types and function calls
-number_of_decisions = 0
-number_of_propagations = 0
+# global instance of the stats agent (const)
+STATS = TwoSatStats()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -51,16 +51,14 @@ def main():
             sys.exit(1)
     
     # prepare measuring of stats
+    global STATS
     if args.show_stats:
-        start_time = time.process_time()
-        tracemalloc.start()
+        STATS.start()
     # now finally do the thing
     satisfiable, assignments = two_sat(formula)
     # stop measuring of stats
     if args.show_stats:
-        current, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        time_elapsed = time.process_time() - start_time
+        STATS.stop()
 
     # print results
     if satisfiable:
@@ -72,13 +70,7 @@ def main():
     
     # print stats
     if args.show_stats:
-        stats = [
-            ["Peak Memory Usage",   f"{round(peak / 10**6, 2)} MB"],
-            ["Process time",        f"{round(time_elapsed, 2)} s"],
-            ["Number of decisions",     number_of_decisions],
-            ["Number of propagations",  number_of_propagations]
-        ]
-        print(tabulate(stats))
+        print(STATS)
 
 def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
     """Applies the 2-SAT algorithm to the given formula f.
@@ -94,25 +86,21 @@ def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
         True plus fulfilling assignment if f is satisfiable, False and None if not.
     """
 
-    # preprocessing
-    # find a unit clause
-    if literal := find_unit_clause(f):
-        var = abs(literal)
-        assigned_value = True if literal > 0 else False # figure out what value it should be assigned to make it true
-        f = unit_propagation(f, (var, assigned_value))  # unit propagation
-
+    # preprocessing, initates assignments
+    f, assignments = unit_propagation(f)  # unit propagation
     if empty_set_contained(f):
         return False, None
 
     # loop
-    assignments = []
-    global number_of_decisions
+    global STATS
     while var := get_var(f):  # while vars(f) != empty set
         # decision time - gotta count it
-        number_of_decisions -=- 1 # cooler than +=
+        STATS.decide()
         # assign 0 to the var and propagate
         new_f, new_assignments = unit_propagation(apply_assignment(f, (var, False)))
         if empty_set_contained(new_f):  # empty set is contained
+            # decision time - gotta count it
+            STATS.decide()
             # assign 1 to the var
             new_f, new_assignments = unit_propagation(apply_assignment(f, (var, True)))
             if empty_set_contained(new_f):
@@ -123,7 +111,7 @@ def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
     # vars(f) == empty set
     return True, assignments
 
-def get_var(f: List[List[int]]) -> int:
+def get_var(f: List[List[int]]) -> Optional[int]:
     """Gets a variable in the formula f.
 
     Parameters
@@ -163,13 +151,16 @@ def empty_set_contained(f: List[List[int]]) -> bool:
             return True
     return False
 
-def unit_propagation(f) -> (List[List[int]], List[Tuple[int, bool]]):
+def unit_propagation(f: List[List[int]], stats_agent: StatsAgent = globals()["STATS"]) -> (List[List[int]], List[Tuple[int, bool]]):
     """Applies unit propagation to the given formula.
 
     Parameters
     ----------
     f : List[List[int]]
         The given formula.
+    stats_agent: StatsAgent
+        The stats agent is also passed as an argument so we can use the method in different modules.
+        Default: the global stats_agent
 
     Returns
     -------
@@ -179,14 +170,13 @@ def unit_propagation(f) -> (List[List[int]], List[Tuple[int, bool]]):
 
     # deep copy as we don't want to change f or the clauses in f
     f = deepcopy(f)
-    # apply the given assignment
-    assignments = []  # add it to the list of assignments
+    # init local list of assignments
+    assignments = []
 
     # propagate
-    global number_of_propagations
     while literal := find_unit_clause(f): # while unit clauses are found
         # propagation time - gotta count it
-        number_of_propagations -=- 1  # chad version of += 1
+        stats_agent.propagate() # ! does not use the global one
         # assign value so that it makes the literal in the unit clause true
         assigned_value = True if literal > 0 else False
         # apply the propagated assignment
@@ -195,7 +185,7 @@ def unit_propagation(f) -> (List[List[int]], List[Tuple[int, bool]]):
         f = apply_assignment(f, assignment)
     return f, assignments
 
-def find_unit_clause(f: List[List[int]]) -> int:
+def find_unit_clause(f: List[List[int]]) -> Optional[int]:
     """Finds a unit clause in the given formula f.
 
     Parameters
