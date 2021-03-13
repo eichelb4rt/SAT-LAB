@@ -6,13 +6,15 @@ from copy import deepcopy, copy
 from typing import List, Tuple, Optional
 
 # add the 2-SAT directory to the path so i can import read_dimacs and more already existing features from it
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}2-SAT")
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
 import read_dimacs as dimacs    # no vscode, you're wrong. This is not an unresolved import. fucker.
-from two_sat import unit_propagation, apply_assignment
+from data_structures import Clause, Formula, Assignment, Assignments, Trail, WatchedClauses
 
 # global variables
-assignments = []
-original_formula = []
+assignments: Assignment
+original_formula: Formula
+trail: Trail
+watched_clauses: WatchedClauses
 
 def main():
     parser = argparse.ArgumentParser()
@@ -39,13 +41,16 @@ def main():
     )
     args = parser.parse_args()
     with open(args.input, "r") as f:
-        formula = dimacs.read_cnf(f.readlines())
+        lines = f.readlines()
+        formula = dimacs.read_cnf(lines)    # reads the formula from the given dimacs encoding
+        variables = dimacs.get_variables_in_dimacs(lines)   # gets the number of variables from the given dimacs encoding
     global original_formula, assignments
     original_formula = formula
-    print(dpll_solver(), assignments)
+    assignments = [None for variable in range(variables)]   # prepare assignments
+    print(cdcl_solver(), assignments)
 
-def dpll_solver() -> bool:
-    """DPLL with preprocessing.
+def cdcl_solver() -> bool:
+    """CDCL with preprocessing.
 
     Returns
     -------
@@ -54,44 +59,187 @@ def dpll_solver() -> bool:
     """
 
     # pre-processing
+    # UP
+    # TODO: UP
     # check for TERMINATION
     if is_empty_formula_mf():
         return True
     if empty_set_contained_mf():
         return False
     # the real thing
-    return dpll_mf()
+    return cdcl_preprocessed()
 
-def dpll_mf() -> bool: # mf = memory friendly, obviously
-    """The loop inside DPLL.
+def cdcl_preprocessed() -> bool:
+    """CDCL assuming the formula was preprocessed
 
     Returns
     -------
     bool
         True if the global formula is satisfiable, false if not.
     """
-    global assignments, original_formula    # we're using these global variables
-    unit_propagation_mf()   # unit propagation
-    eliminate_pure_literals_mf()    # eliminate pure literals
-    # check for TERMINATION
-    if is_empty_formula_mf():
+    global assignments, original_formula, decision_level    # we're using these global variables
+    decision_level = 0
+    while var := get_var_mf():  # while we find new variables
+        decision_level -=- 1    # chad += 1
+        decide(var) # adds assignment to trail
+        while conflict_clause := propagate():  # while we find new conflicts (propagate returns conflict clause or None)
+            if decision_level == 0:
+                return False    # UNSAT
+            learned_clause = analyse_conflict(conflict_clause)  # the clause that is supposed to be learned from the derived conflict
+            learn(learned_clause)   # learn the clause
+            backtrack(learned_clause)   # start backtracking, depends on learned clause
+        apply_restart_policy()  # maybe restart
+    return True # SAT
+
+
+
+# =======================================================================================
+# ================================ UP + watched literals ================================
+# =======================================================================================
+
+def get_new_unit_clauses(assignment: Assignment) -> List[Clause]:
+        """Changes the 'watched literals' data structure to fit the new assignment and return the clauses that became unit.
+
+        Parameters
+        ----------
+        assignment : Assignment
+            The applied assignment.
+
+        Returns
+        -------
+        List[Clause]
+            A list of clauses that became unit after the application of the given assignment.
+        """
+
+        global watched_clauses  # we are using the watched clauses data structure to figure out which clauses become unit
+        # the literal being falsified by the given assignment:
+        literal_falsified = -assignment.var if assignment.value == True else assignment.var    # == True for readability
+        possible_clauses = watched_clauses[literal_falsified]   # clauses where the falsified literal is being watched in
+        new_unit_clauses = []   # initiate list of new unit clauses
+        for clause in possible_clauses:
+            # becomes_unit changes the watched literals and determines if the clause becomes true after the falsification of the literal
+            if becomes_unit(clause):
+                new_unit_clauses.append(clause) # this clause became unit
+        return new_unit_clauses
+
+def becomes_unit(clause: Clause) -> bool:
+        """Checks the invariant and returns if the clause became unit or not. May change the watched literals.
+
+        Parameters
+        ----------
+        clause: Clause
+            The clause that maybe became unit.
+
+        Returns
+        -------
+        bool
+            True if the clause became unit, false otherwise.
+        """
+
+        global assignments  # we need to know about the current assignments
+        # check if invariant is maintained:
+        # check if at least one watched literal is true
+        for literal in clause.watched_literals:
+            if assignments.value(literal) == True:
+                return False    # invariant holds -> clause did not become unit
+        # check if both watched literals are unassigned
+        both_unassigned = True
+        for literal in clause.watched_literals:
+            if assignments.value(literal) != None:
+                both_unassigned = False
+        if both_unassigned:
+            return False    # invariant holds -> clause did not become unit
+        # find out which of the 2 watched literals was falsified
+        for literal in clause.watched_literals:
+            if assignments.value(literal) == False:
+                falsified_literal = literal
+        watched_literal_index = clause.watched_literals.index(falsified_literal)  # is it the first or the second watched literal?
+        # find a new unassigned literal to watch as our currently watched literal is falsified
+        # we start looking just after the one that we currently watch and go one full loop around the whole clause
+        offset = clause.literals.index(falsified_literal) + 1 # index of the falsified literal in the clause + 1
+        for literal in clause.literals_iter(offset):
+            if literal in clause.watched_literals and assignments[abs(literal)] != False: # we found an unassigned (or satisfied) literal that is not already being watched
+                clause.watched_literals[watched_literal_index] = literal  # so we can watch it
+                return False    # that means invariant is maintained and clause not unit
+        # if we didn't find an unassigned (or satisfied), unwatched literal, the invariant is broken and the clause became unit
         return True
-    if empty_set_contained_mf():
-        return False
-    
-    var = get_var_mf()  # Oh i'd like some sweet variables now. Wanna go get some?
-    # recursion go brr
-    entry_point = len(assignments)  # entry point is the index of the next variable to be assigned
-    assignments.append((var, False))    # assign(var, 0)
-    if dpll_mf():
-        return True
-    assignments = assignments[:entry_point] # unassign(x)
-    # ite, let's just try it again, shall we?
-    assignments.append((var, True))    # assign(var, 1)
-    if dpll_mf():
-        return True
-    assignments = assignments[:entry_point] # unassign(x)
-    return False
+
+
+
+# ==========================================================================
+# ================================ restarts ================================
+# ==========================================================================
+
+def apply_restart_policy():
+    """Applies the restart policy.
+    """
+
+def backtrack(clause: List[int]):
+    """Changes trail and decision level for non-chronological backtracking depending on the learned clause.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The learned clause.
+    """
+
+
+
+# =================================================================================
+# ================================ clause learning ================================
+# =================================================================================
+
+def learn(clause: List[int]):
+    """Learns a given clause.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The clause that is supposed to be learned.
+    """
+
+def propagate() -> Optional[List[int]]:
+    """Unit propagation until a conflict is found.
+
+    Returns
+    -------
+    Optional[List[int]]
+        The conflict clause, None if no conflict happened.
+    """
+
+def analyse_conflict(conflict_clause: List[int]) -> List[int]:
+    """Analyses the current conflict.
+
+    Parameters
+    ----------
+    conflict_clause : List[int]
+        The conflict that was just found.
+
+    Returns
+    -------
+    List[int]
+        The clause to be learned.
+    """
+
+
+def decide(var: int):
+    """Decides the value of a given variable and adds the assignment to the trail.
+
+    Parameters
+    ----------
+    var : int
+        The variable to be decided.
+    """
+
+    global assignments # we're using these global variables
+    # decide true TODO: real decision
+    assignments.append((var, True))
+
+
+
+# ====================================================================================
+# ================================ mf stuff from DPLL ================================
+# ====================================================================================
 
 def get_var_mf() -> Optional[int]: # mf = memory friendly, obviously
     """Gets a variable from the formula.
