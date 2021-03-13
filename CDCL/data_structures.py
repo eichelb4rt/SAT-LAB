@@ -1,11 +1,24 @@
 from typing import List, Tuple, Optional
 from collections.abc import Sequence, Collection
 
+def negate(boolean: Optional[bool]):
+    """Negates the given extended boolean (None stays None).
+    This is important as normal negation in python (not boolean) turns None into True.
+    The negation of an unassigned literal would therefore be True, we do not want that.
+
+    Parameters
+    ----------
+    boolean : Optional[bool]
+        The given boolean.
+    """
+
+    if boolean is None:
+        return None
+    return not boolean
 class Clause(Sequence):
     def __init__(self, literals: List[int]):
         self.literals = literals
-        self.watched_literals = literals[:2]  # watch the first 2 literals in the clause - we save the watched literals through the index
-        # we watch the first 2 literals since the formula is preprocessed and therefore does not have unit clause or conflicts
+        self.watched_literals = literals[:2]  # watch the first 2 literals in the clause - only 1 wide if the clause is already unit
     
     def literals_iter(self, offset: int):
         """Iterate over the literals with a given index offset modulo the clause length (one full loop around the clause).
@@ -20,13 +33,16 @@ class Clause(Sequence):
             yield self.literals[(offset + index) % len(self.literals)]
     
     def __iter__(self):
-        return iter(literals)
+        return iter(self.literals)
     
     def __getitem__(self, key: int):
-        return literals[key]
+        return self.literals[key]
     
     def __len__(self):
-        return len(literals)
+        return len(self.literals)
+    
+    def __str__(self):
+        return str(self.literals)
 
 class Formula: List[Clause]
 
@@ -133,7 +149,7 @@ class Assignments(Sequence):
         if literal > 0:
             return self[literal]
         else:
-            return not self[-literal]
+            return negate(self[-literal])
     
     def assign(self, assignment: Assignment):
         """Applies a given assignment.
@@ -164,7 +180,7 @@ class Assignments(Sequence):
         return iter(self.assignment_view)
     
     def __len__(self):
-        return len(assignments)
+        return len(self.assignments)
     
     def __str__(self) -> str:
         """String representation of the assignments.
@@ -193,7 +209,8 @@ class Trail(Sequence):
     """
 
     def __init__(self):
-        self.trail = []
+        self.trail: List[DecisionLevel] = []
+        self.trail.append(DecisionLevel(None))  # decision level 0
     
     @property
     def decision_level(self) -> int:
@@ -214,73 +231,17 @@ class Trail(Sequence):
         return self.trail[key]
     
     def decide(self, assignment: Assignment):
-        self.trail.append(DecisionLevel())
-
-class WatchedClauses:
-    """Implementation of watched literals suggested by the presentation slides in SAT-LAB.
-
-    short explanation (copied from slides):
-    (a) maintain a list of ‘watched clauses’ for each literal
-    (b) process a variable assignment by:
-        1. visit watched clauses for the falsified literal in order
-        2. make sure the invariant holds
-            • you may need to ‘swap the watch’
-        3. if clause becomes unit, add unit assignment to trail
-            • note: in this case, both watched literals have the same
-                decision level
-            • so there is no need to swap the watch
-    (c) if the invariant cannot be maintained, we reach conflict
-    """
-
-    def __init__(self, formula: Formula, n: int):
-        """Initiates watched literals for a given preprocessed formula f with n variables.
-
-        Parameters
-        ----------
-        f : Formula
-            The given formula. Has to be preprocessed.
-        n : int
-            Number of variables in the given formula.
-        """
-
-        self.watched_clauses_positive = [ [] for _ in range(n) ]   # init the list of watched clauses for positive literals
-        self.watched_clauses_negative = [ [] for _ in range(n) ]   # init the list of watched clauses for negative literals
-        # now for every clause, take a look at the watched literals
-        for clause in formula:
-            # for every watched literal in the clause, add the clause to the list of clauses that the literal is being watched in
-            for literal in clause.watched_literals:
-                self[literal].append(clause)    # self[literal] is the list of clauses that the literal is being watched in
+        self.trail.append(DecisionLevel(assignment))    # create a new decision level with the decision
     
-    def __getitem__(self, literal: int) -> List[Clause]:
-        """Gets the list of clauses where the given literal is being watched.
-
-        Parameters
-        ----------
-        literal : int
-            The given literal.
-
-        Returns
-        -------
-        List[Clause]
-            A list of clauses where the literal is being watched.
-        """
-
-        if literal > 0:
-            return self.watched_clauses_positive[abs(literal)]
-        elif literal < 0:
-            return self.watched_clauses_negative[abs(literal)]
-        else:
-            raise IndexError("0 is not a valid variable.")
-    
-    def update(self, assignment: Assignment):
-        """Update the watched clauses data structure after a given assignment.
+    def add_propagation(self, assignment: Assignment, reason: Clause):
+        """Adds a propagation to the propagation side of the latest decision level.
 
         Parameters
         ----------
         assignment : Assignment
-            The given assignment.
+            The assignment that was propagated.
+        reason : Clause
+            The reason clause for the propagated assignment.
         """
 
-        falsified_literal = -assignment.var if assignment.value == True else assignment.var    # == True for readability
-        old_watched_clauses = self[falsified_literal]
-        
+        self.trail[self.decision_level].add_propagation(assignment, reason)
