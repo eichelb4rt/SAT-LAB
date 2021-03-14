@@ -5,16 +5,211 @@ from data_structures import Formula, Clause, Assignments, Assignment, Trail
 import cdcl
 
 # global variables
-clauses_array_form = [[-1, 2], [-1, -2]]
-assignments = Assignments(3)
+clauses_array_form = [[-1, 2], [-2, 3], [-2, 4], [-3, -4]]
+assignments = Assignments(4)
 original_formula: Formula = [Clause(literals) for literals in clauses_array_form]
 trail = Trail()
+
+# =================================================================================
+# ================================ clause learning ================================
+# =================================================================================
+
+def learn(clause: List[int]):
+    """Learns a given clause.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The clause that is supposed to be learned.
+    """
+
+def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for performance (linked lists) and maybe an implication graph
+    """Analyses the current conflict.
+
+    Parameters
+    ----------
+    conflict_clause : Clause
+        The conflict that was just found.
+
+    Returns
+    -------
+    Clause
+        The clause to be learned.
+    """
+
+    global trail
+    assignments_on_decision_level = trail[trail.decision_level].assignments
+    #variables_on_decision_level = [assignment.var for assignment in assignments_on_decision_level]
+    cut = conflict_clause   # initiate the cut with the conflict clause
+    conflict_zone = []  # the variables in the conflict zone of the cut
+    imp_graph = implication_graph_on_decision_level()   # the implication graph only on the decision level
+    dec_vars = variables_on_decision_level(cut, trail.decision_level)   # dec_vars is now the list of variables on the last decision level (in the cut)
+    while len(dec_vars) > 1:    # while there is more than 1 literal on the current decision level in the current clause, keep going
+        pivot = dec_vars[0] # the first variable in the list will be our pivot
+        # now check if the pivot can reach any other variables in the cut
+        # we do this with DF search:
+        others_reachable = False
+        open_list = [pivot] # initiate the open list (nodes to be expanded)
+        while open_list:    # while there are nodes in the open list
+            node = open_list[len(open_list) - 1] # node to be expanded - the last node in the list (we append new nodes at the end)
+            if node in conflict_zone:
+                open_list.remove(node)  # we don't need to look past the cut
+            elif not node is pivot and node in dec_vars:    # if a node is in the cut and is not the pivot itself
+                others_reachable = True # then another variable in the cut is reachable
+                break
+            else:   # node is not in cut and not in conflict zone -> expand it
+                open_list.remove(node)  # remove the node
+                # append it's direct successors
+                open_list += imp_graph[node]
+        # we found out if other variables in the cut are reachable from the pivot
+        if others_reachable:
+            # go to the end of the queue!
+            dec_vars.append(pivot)
+            dec_vars.remove(pivot)
+            continue    # and look at the next variable - continue is actually not needed here, just for readability
+        else:   # we can't reach any variables outside the cut if we add this to the cut, so let's just do that shall
+            reason = trail[trail.decision_level].var_reason(pivot)  # reason clause for assignment of pivot
+            cut = resolve(cut, reason, pivot)    # resolve the reason with the cut
+            new_decision_variables = variables_on_decision_level(reason, trail.decision_level)  # the new variables that are now in the cut on the decision level
+            new_decision_variables = [variable for variable in new_decision_variables if variable not in dec_vars]    # only add actually new variables. we do not want duplicates.
+            dec_vars += new_decision_variables  # add the new decision variables
+            dec_vars.remove(pivot)  # remove the expanded variable from the variables to be expanded
+            conflict_zone.append(pivot) # the pivot is now in the conflict zone
+    # we resolved until there was only 1 literal on decision level left. This is the 1UP. This is the way.
+    return cut
+
+def resolve(a: Clause, b: Clause, pivot: int) -> Clause:
+    """Resolution of clauses a and b with a given pivot.
+
+    Parameters
+    ----------
+    a : Clause
+        The given clause a.
+    b : Clause
+        The given clause b.
+    pivot : int
+        The pivot for the resolution.
+
+    Returns
+    -------
+    Clause
+        Resolution boiiiis. Can't repeat it enough.
+    """
+
+    # every literal from a and b is in there except for the pivoted variable
+    literals = [literal for literal in a.literals + b.literals if abs(literal) != pivot]
+    return Clause(literals)
+
+def implication_graph_on_decision_level() -> dict:
+    """Returns the implication graph on the decision level (only the latest decision level!).
+
+    Returns
+    -------
+    dict
+        Adjancency list of the implication graph (a: [b,c]) if a's direct successors are b and c.
+    """
+
+    global trail
+    adjacency_list = {}
+    assignments_on_level = trail[trail.decision_level].assignments  # the variables that were assigned on the latest decision level
+    # initialise the list for every variable
+    for assignment in assignments_on_level:
+        adjacency_list[assignment.var] = []
+    # draw the lines
+    propagations = trail[trail.decision_level].propagations # only propagations have predecessors
+    for propagation in propagations:
+        # the direct predecessor of a variable is every variable that's in the reason clause except for the assignment var itself
+        predecessors = variables_on_decision_level(propagation.reason, trail.decision_level) # we only care for variables on the decision level
+        predecessors.remove(propagation.assignment.var) # except for the assignment var itself
+        # append assignment var to the lists of the predecessor
+        for predecessor in predecessors:
+            adjacency_list[predecessor].append(propagation.assignment.var)
+    return adjacency_list
+
+def variables_on_decision_level(clause: Clause, level: int) -> List[int]:
+    """Returns the list of variables in given clause that are on the given decision level.
+
+    Parameters
+    ----------
+    clause : Clause
+        The given clause.
+    
+    level : int
+        The given decision level.
+
+    Returns
+    -------
+    List[int]
+        The list of variables in the clause that were assigned on the given decision level.
+    """
+
+    global trail
+    variables_on_level = [assignment.var for assignment in trail[level].assignments] # the variables that were assigned on the given decision level
+    return [abs(literal) for literal in clause if abs(literal) in variables_on_level]
+
+
+def reason(assignment: Assignment) -> Clause:
+    """Returns the reason for a given propagation assignment.
+
+    Parameters
+    ----------
+    assignment : Assignment
+        The given assignment (was propagated, decisions do not have reasons).
+
+    Returns
+    -------
+    Clause
+        The reason clause for the given assignment.
+    """
+
+    global trail
+    return trail[assignment.decision_level].reason(assignment)  # return the reason for the assignment on the decision level for the assignment
+
+
+
+# ===========================================================================
+# ================================ decisions ================================
+# ===========================================================================
+
+
+def decide(var: int):
+    """Decides the value of a given variable and adds the assignment to the trail.
+
+    Parameters
+    ----------
+    var : int
+        The variable to be decided.
+    """
+
+    global assignments, trail # we're using these global variables
+    value = variable_decision_heuristic(var)    # what value should be assigned to the variable
+    assignment = Assignment((var, value), trail.decision_level)   # assignment as the type Assignment
+    assignments.assign(assignment)  # add the assignment to the list of assignments
+    trail.decide(assignment)    # add it to the trail
+
+def variable_decision_heuristic(var: int) -> bool:
+    """The suggested value for a given variable.
+
+    Parameters
+    ----------
+    var : int
+        The given variable.
+
+    Returns
+    -------
+    bool
+        The suggested value for the variable assignment.
+    """
+
+    return True
+
+
 
 # =======================================================================================
 # ================================ UP + watched literals ================================
 # =======================================================================================
 
-def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 2 unit clauses, it is satisfied twice
+def propagate() -> Optional[Clause]:
     """Unit propagation until a conflict is derived.
 
     Returns
@@ -40,7 +235,7 @@ def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 
         # figure out the assignment to satisfy the unit
         var = abs(unit)
         value = True if unit > 0 else False
-        new_assignment = Assignment((var, value))
+        new_assignment = Assignment((var, value), trail.decision_level)
         # apply the assignment and add it to the trail - the unit clause is the reason for the assignment.
         assignments.assign(new_assignment)  # apply the assignment
         trail.add_propagation(new_assignment, unit_clause)  # add it to the trail
@@ -57,7 +252,7 @@ def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 
     # there are no more unit clauses left and no conflict was derived
     return None
 
-def get_new_unit_clauses(assignment: Optional[Assignment]) -> List[Clause]:
+def get_new_unit_clauses(assignment: Optional[Assignment]) -> List[Clause]: # TODO: we might be able to make this more efficient with 'watched clauses'
     """Changes the 'watched literals' data structure to fit the new assignment and return the clauses that became unit.
 
     Parameters
@@ -149,7 +344,8 @@ def becomes_unit(clause: Clause, assignment: Assignment) -> bool:
     # if we didn't find an unassigned (or satisfied), unwatched literal, the invariant is broken and the clause became unit
     return True
 
-print(propagate())
-assignments.assign(Assignment((1, True)))
-trail.decide(Assignment((1, True)))
-print(propagate())
+decide(1)
+conflict = propagate()
+print(conflict)
+we_learnin_here = analyse_conflict(conflict)
+print(we_learnin_here)

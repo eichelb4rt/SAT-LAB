@@ -17,8 +17,8 @@ def negate(boolean: Optional[bool]):
     return not boolean
 class Clause(Sequence):
     def __init__(self, literals: List[int]):
-        self.literals = literals
-        self.watched_literals = literals[:2]  # watch the first 2 literals in the clause - only 1 wide if the clause is already unit
+        self.literals = list(dict.fromkeys(literals))   # same list as literals, just removes duplicates
+        self.watched_literals = self.literals[:2]  # watch the first 2 literals in the clause - only 1 wide if the clause is already unit
     
     def literals_iter(self, offset: int):
         """Iterate over the literals with a given index offset modulo the clause length (one full loop around the clause).
@@ -46,33 +46,24 @@ class Clause(Sequence):
 
 class Formula: List[Clause]
 
-class Assignment(Tuple[int, Optional[bool]]):
+class Assignment:
     """Single variable assignment.
     """
 
-    @property
-    def var(self) -> int:
-        """The assigned variable.
+    def __init__(self, assignment: Tuple[int, Optional[bool]], decision_level: int):
+        """Creates an assignment.
 
-        Returns
-        -------
-        int
-            The assigned variable.
+        Parameters
+        ----------
+        assignment : Tuple[int, Optional[bool]]
+            The actual assignment - the variable and the value assigned.
+        decision_level : int
+            The decision level at which the assignment is applied.
         """
-
-        return self[0]
-    
-    @property
-    def value(self) -> Optional[bool]:
-        """The assigned value.
-
-        Returns
-        -------
-        Optional[bool]
-            The assigned value.
-        """
-
-        return self[1]
+        
+        self.var = assignment[0]
+        self.value = assignment[1]
+        self.decision_level = decision_level
 
 class Assignments(Sequence):
     """Partial assignment with fast access times.
@@ -87,7 +78,8 @@ class Assignments(Sequence):
             Number of variables to be assigned.
         """
 
-        self.assignments = [None] * n  # generate 'unassigned' for every variable.
+        self.values = [None] * n  # generate 'unassigned' for every variable.
+        self.decision_levels = [None] * n   # generate 'no decision level yet' for every variable.
         # Note that the value for every variable x is stored in self.assignments[x-1] since the variables start at 1 and the array starts/list starts at 0.
     
     @property
@@ -100,7 +92,8 @@ class Assignments(Sequence):
             The assignment view.
         """
 
-        return [(index + 1, value) for index, value in enumerate(self.assignments)] # every index holds the value of the variable (index + 1). Now it is brought into a form that fits the class Assignment
+        # for every index: return an assignment with variable i+1, its value stored in self.values, and its decision level stored in self.decision_levels
+        return [Assignment((i + 1, self.values[i]), self.decision_levels[i]) for i in range(len(self.values))] # every index holds the value of the variable (index + 1). Now it is brought into a form that fits the class Assignment
         # variable (n) is stored at index (n-1)
     
     def __getitem__(self, variable: int) -> bool:
@@ -117,7 +110,7 @@ class Assignments(Sequence):
             The assignment of the given variable.
         """
 
-        return self.assignments[variable - 1]   # variable (n) is stored at index (n-1)
+        return self.values[variable - 1]   # variable (n) is stored at index (n-1)
     
     def __setitem__(self, variable: int, value: Optional[bool]):
         """Sets assigns a given value to a given variable.
@@ -130,7 +123,7 @@ class Assignments(Sequence):
             The given value.
         """
 
-        self.assignments[variable - 1] = value  # variable (n) is stored at index (n-1)
+        self.values[variable - 1] = value  # variable (n) is stored at index (n-1)
     
     def value(self, literal: int) -> Optional[bool]:
         """Returns the value of a given literal in the current assignment.
@@ -160,7 +153,8 @@ class Assignments(Sequence):
             The given assignment.
         """
 
-        self.assignments[assignment.var - 1] = assignment.value # variable (n) is stored at index (n-1)
+        self.values[assignment.var - 1] = assignment.value # variable (n) is stored at index (n-1)
+        self.decision_levels[assignment.var - 1] = assignment.decision_level
     
     def __delitem__(self, variable: int):
         """Unassigns a given variable.
@@ -171,7 +165,8 @@ class Assignments(Sequence):
             The given variable.
         """
 
-        self.assignments[variable - 1] = None   # see note in __init__
+        self.values[variable - 1] = None   # see note in __init__
+        self.decision_levels[variable - 1] = None
     
     def __iter__(self):
         """Returns iterator over assignment view (See method assignment_view).
@@ -180,7 +175,7 @@ class Assignments(Sequence):
         return iter(self.assignment_view)
     
     def __len__(self):
-        return len(self.assignments)
+        return len(self.values)
     
     def __str__(self) -> str:
         """String representation of the assignments.
@@ -193,16 +188,75 @@ class Assignments(Sequence):
 
         return str(self.assignment_view)
 
+class Propagation:
+    """A propagated assignment. Includes the assignment itself and a reason clause.
+    """
+
+    def __init__(self, assignment: Assignment, reason: Clause):
+        self.assignment = assignment
+        self.reason = reason
+
 class DecisionLevel:
     """Sequence of assignments made on a specific decision level. Includes a decision assignment and a number of propagations. Propagations consist of an assignment and a clause for a reason.
     """
 
     def __init__(self, decision: Assignment):
         self.decision = decision
-        self.propagations = []  # elements of type (assignment, reason)
+        self.propagations = []
     
     def add_propagation(self, assignment: Assignment, reason: Clause):
-        self.propagations.append((assignment, reason))
+        self.propagations.append(Propagation(assignment, reason))
+    
+    @property
+    def assignments(self) -> List[Assignment]:
+        """Returns the assignments on this decision level.
+
+        Returns
+        -------
+        List[Assignment]
+            The list of assignments applied on this decision level (decision + propagations).
+        """
+
+        assignments = [propagation.assignment for propagation in self.propagations]    # propagation is of type (assignment, clause) 
+        assignments.append(self.decision)
+        return assignments
+    
+    def reason(self, assignment: Assignment) -> Clause: # TODO: make more efficient (for example put it in assignments)
+        """Returns the reason for a given propagation assignment.
+
+        Parameters
+        ----------
+        assignment : Assignment
+            The given assignment (was propagated, decisions do not have reasons).
+
+        Returns
+        -------
+        Clause
+            The reason clause for the given assignment.
+        """
+
+        # look through the propagations on this decision level and return the reason for the found assignment
+        for propagation in self.propagations:
+            if propagation.assignment.var == assignment.var:    # basically checks if we found the same assignment (there's only one assignment with that variable)
+                return propagation.reason
+    
+    def var_reason(self, var: int) -> Clause:
+        """Basically the same as reason(assignment), just that we only have to pass the variable. That may be more convenient sometimes.
+
+        Parameters
+        ----------
+        var : int
+            The variable that was assigned.
+
+        Returns
+        -------
+        Clause
+            The reason clause for the assignment for the variable.
+        """
+
+        for propagation in self.propagations:
+            if propagation.assignment.var == var:    # basically checks if we found the same assignment (there's only one assignment with that variable)
+                return propagation.reason
 
 class Trail(Sequence):
     """A trail of the decisions. Is divided into decision levels.

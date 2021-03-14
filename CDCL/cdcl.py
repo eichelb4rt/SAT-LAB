@@ -96,7 +96,7 @@ def cdcl_preprocessed() -> bool:
 # ================================ UP + watched literals ================================
 # =======================================================================================
 
-def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 2 unit clauses, it is satisfied twice
+def propagate() -> Optional[Clause]:
     """Unit propagation until a conflict is derived.
 
     Returns
@@ -122,7 +122,7 @@ def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 
         # figure out the assignment to satisfy the unit
         var = abs(unit)
         value = True if unit > 0 else False
-        new_assignment = Assignment(var, value)
+        new_assignment = Assignment((var, value), trail.decision_level)
         # apply the assignment and add it to the trail - the unit clause is the reason for the assignment.
         assignments.assign(new_assignment)  # apply the assignment
         trail.add_propagation(new_assignment, unit_clause)  # add it to the trail
@@ -139,7 +139,7 @@ def propagate() -> Optional[Clause]:    # TODO: fix problem: if a literal is in 
     # there are no more unit clauses left and no conflict was derived
     return None
 
-def get_new_unit_clauses(assignment: Optional[Assignment]) -> List[Clause]:
+def get_new_unit_clauses(assignment: Optional[Assignment]) -> List[Clause]: # TODO: we might be able to make this more efficient with 'watched clauses'
     """Changes the 'watched literals' data structure to fit the new assignment and return the clauses that became unit.
 
     Parameters
@@ -241,6 +241,12 @@ def apply_restart_policy():
     """Applies the restart policy.
     """
 
+
+
+# ==============================================================================
+# ================================ backtracking ================================
+# ==============================================================================
+
 def backtrack(clause: List[int]):
     """Changes trail and decision level for non-chronological backtracking depending on the learned clause.
 
@@ -249,6 +255,24 @@ def backtrack(clause: List[int]):
     clause : List[int]
         The learned clause.
     """
+
+def backtrack_to(level: int):
+    """Changes trail and decision level for backtracking to the given level.
+
+    Parameters
+    ----------
+    level : int
+        The given level.
+    """
+
+    global assignments, trail
+
+    # unassign variables
+    for decision_level in trail[level:]:    # includes level , level + 1 , ... , current decision level
+        for assignment in decision_level.assignments: # the assignments on the decision level
+            del assignments[assignment.var] # unassign the variable
+    # reset trail
+    trail = trail[:level]   # keeps every decision level before level, removes everything else
 
 
 
@@ -265,19 +289,153 @@ def learn(clause: List[int]):
         The clause that is supposed to be learned.
     """
 
-def analyse_conflict(conflict_clause: List[int]) -> List[int]:
+def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for performance (linked lists) and maybe an implication graph
     """Analyses the current conflict.
 
     Parameters
     ----------
-    conflict_clause : List[int]
+    conflict_clause : Clause
         The conflict that was just found.
 
     Returns
     -------
-    List[int]
+    Clause
         The clause to be learned.
     """
+
+    global trail
+    assignments_on_decision_level = trail[trail.decision_level].assignments
+    #variables_on_decision_level = [assignment.var for assignment in assignments_on_decision_level]
+    cut = conflict_clause   # initiate the cut with the conflict clause
+    conflict_zone = []  # the variables in the conflict zone of the cut
+    imp_graph = implication_graph_on_decision_level()   # the implication graph only on the decision level
+    dec_vars = variables_on_decision_level(cut, trail.decision_level)   # dec_vars is now the list of variables on the last decision level (in the cut)
+    while len(dec_vars) > 1:    # while there is more than 1 literal on the current decision level in the current clause, keep going
+        pivot = dec_vars[0] # the first variable in the list will be our pivot
+        # now check if the pivot can reach any other variables in the cut
+        # we do this with DF search:
+        others_reachable = False
+        open_list = [pivot] # initiate the open list (nodes to be expanded)
+        while open_list:    # while there are nodes in the open list
+            node = open_list[len(open_list) - 1] # node to be expanded - the last node in the list (we append new nodes at the end)
+            if node in conflict_zone:
+                open_list.remove(node)  # we don't need to look past the cut
+            elif not node is pivot and node in dec_vars:    # if a node is in the cut and is not the pivot itself
+                others_reachable = True # then another variable in the cut is reachable
+                break
+            else:   # node is not in cut and not in conflict zone -> expand it
+                open_list.remove(node)  # remove the node
+                # append it's direct successors
+                open_list += imp_graph[node]
+        # we found out if other variables in the cut are reachable from the pivot
+        if others_reachable:
+            # go to the end of the queue!
+            dec_vars.append(pivot)
+            dec_vars.remove(pivot)
+            continue    # and look at the next variable - continue is actually not needed here, just for readability
+        else:   # we can't reach any variables outside the cut if we add this to the cut, so let's just do that shall
+            reason = trail[trail.decision_level].var_reason(pivot)  # reason clause for assignment of pivot
+            cut = resolve(cut, reason, pivot)    # resolve the reason with the cut
+            new_decision_variables = variables_on_decision_level(reason, trail.decision_level)  # the new variables that are now in the cut on the decision level
+            new_decision_variables = [variable for variable in new_decision_variables if variable not in dec_vars]    # only add actually new variables. we do not want duplicates.
+            dec_vars += new_decision_variables  # add the new decision variables
+            dec_vars.remove(pivot)  # remove the expanded variable from the variables to be expanded
+            conflict_zone.append(pivot) # the pivot is now in the conflict zone
+    # we resolved until there was only 1 literal on decision level left. This is the 1UP. This is the way.
+    return cut
+
+def resolve(a: Clause, b: Clause, pivot: int) -> Clause:
+    """Resolution of clauses a and b with a given pivot.
+
+    Parameters
+    ----------
+    a : Clause
+        The given clause a.
+    b : Clause
+        The given clause b.
+    pivot : int
+        The pivot for the resolution.
+
+    Returns
+    -------
+    Clause
+        Resolution boiiiis. Can't repeat it enough.
+    """
+
+    # every literal from a and b is in there except for the pivoted variable
+    literals = [literal for literal in a.literals + b.literals if abs(literal) != pivot]
+    return Clause(literals)
+
+def implication_graph_on_decision_level() -> dict:
+    """Returns the implication graph on the decision level (only the latest decision level!).
+
+    Returns
+    -------
+    dict
+        Adjancency list of the implication graph (a: [b,c]) if a's direct successors are b and c.
+    """
+
+    global trail
+    adjacency_list = {}
+    assignments_on_level = trail[trail.decision_level].assignments  # the variables that were assigned on the latest decision level
+    # initialise the list for every variable
+    for assignment in assignments_on_level:
+        adjacency_list[assignment.var] = []
+    # draw the lines
+    propagations = trail[trail.decision_level].propagations # only propagations have predecessors
+    for propagation in propagations:
+        # the direct predecessor of a variable is every variable that's in the reason clause except for the assignment var itself
+        predecessors = variables_on_decision_level(propagation.reason, trail.decision_level) # we only care for variables on the decision level
+        predecessors.remove(propagation.assignment.var) # except for the assignment var itself
+        # append assignment var to the lists of the predecessor
+        for predecessor in predecessors:
+            adjacency_list[predecessor].append(propagation.assignment.var)
+    return adjacency_list
+
+def variables_on_decision_level(clause: Clause, level: int) -> List[int]:
+    """Returns the list of variables in given clause that are on the given decision level.
+
+    Parameters
+    ----------
+    clause : Clause
+        The given clause.
+    
+    level : int
+        The given decision level.
+
+    Returns
+    -------
+    List[int]
+        The list of variables in the clause that were assigned on the given decision level.
+    """
+
+    global trail
+    variables_on_level = [assignment.var for assignment in trail[level].assignments] # the variables that were assigned on the given decision level
+    return [abs(literal) for literal in clause if abs(literal) in variables_on_level]
+
+
+def reason(assignment: Assignment) -> Clause:
+    """Returns the reason for a given propagation assignment.
+
+    Parameters
+    ----------
+    assignment : Assignment
+        The given assignment (was propagated, decisions do not have reasons).
+
+    Returns
+    -------
+    Clause
+        The reason clause for the given assignment.
+    """
+
+    global trail
+    return trail[assignment.decision_level].reason(assignment)  # return the reason for the assignment on the decision level for the assignment
+
+
+
+# ===========================================================================
+# ================================ decisions ================================
+# ===========================================================================
 
 
 def decide(var: int):
@@ -289,10 +447,27 @@ def decide(var: int):
         The variable to be decided.
     """
 
-    global assignments # we're using these global variables
-    # decide true TODO: real decision
-    assignments.append((var, True))
+    global assignments, trail # we're using these global variables
+    value = variable_decision_heuristic(var)    # what value should be assigned to the variable
+    assignment = Assignment((var, value), trail.decision_level)   # assignment as the type Assignment
+    assignments.assign(assignment)  # add the assignment to the list of assignments
+    trail.decide(assignment)    # add it to the trail
 
+def variable_decision_heuristic(var: int) -> bool:
+    """The suggested value for a given variable.
+
+    Parameters
+    ----------
+    var : int
+        The given variable.
+
+    Returns
+    -------
+    bool
+        The suggested value for the variable assignment.
+    """
+
+    return True
 
 
 # ====================================================================================
@@ -323,37 +498,6 @@ def get_var_mf() -> Optional[int]: # mf = memory friendly, obviously
     if len(variables) == 0:
         return None
     return variables[0]
-
-def unit_propagation_mf():  # mf = memory friendly, obviously
-    """Applies unit propagation and adds the assigned assignments to the global list of assignments.
-    """
-
-    global original_formula, assignments    # gonna use em both like every time
-    local_formula = apply_assignments(original_formula, assignments)    # apply assignments (uses a deep copy)
-    new_assignments = unit_propagation(local_formula)[1]    # do UP on the local formula
-    for new_assignment in new_assignments:  # append the assignments assigned in UP
-        assignments.append(new_assignment)
-
-def apply_assignments(f: List[List[int]], assignments: List[Tuple[int, bool]]) -> List[List[int]]:
-    """Applies a list of assignments to a given formula f.
-
-    Parameters
-    ----------
-    f : List[List[int]]
-        The given formula f.
-    assignments : List[Tuple[int, bool]]
-        The list of assignments.
-
-    Returns
-    -------
-    List[List[int]]
-        The formula f with all the assignments applied.
-    """
-
-    # no deep copy needed (because apply_assignments already uses them)
-    for assignment in assignments:
-        f = apply_assignment(f, assignment) # apply_assignments uses deep copies
-    return f
 
 def empty_set_contained_mf() -> bool:   # mf = memory friendly, obviously
     """Determines whether the formula with the applied assignment contains an empty clause.
@@ -394,45 +538,6 @@ def is_empty_formula_mf() -> bool:  # mother fucker
         removes_clause_from_formula = -1 * var if assigned_value == False else var    # same here
         f = [clause for clause in f if not removes_clause_from_formula in clause]   # that's all the clauses that do not contain the literal that removes them from the formula
     return len(f) == 0
-
-def eliminate_pure_literals_mf(): # mf = memory friendly, obviously
-    """Adds the assignments for pure literal elimination to the global list of assignments.
-    """
-
-    # get current formula
-    global assignments
-    # get assignments for elimination
-    for literal in get_pure_literals_mf():
-        var = abs(literal)
-        assigned_value = True if literal > 0 else False
-        assignments.append((var, assigned_value))
-
-def get_pure_literals_mf() -> List[int]:    # mf = memory friendly, obviously
-    """Gets all the pure literal in a given formula f.
-
-    Parameters
-    ----------
-    f : List[List[int]]
-        The given formula f.
-
-    Returns
-    -------
-    int
-        All the pure literals. Empty list if none were found.
-    """
-
-    global original_formula, assignments
-    # first make a list of all the literals
-    literals = []
-
-    for clause in original_formula:
-        for literal in clause:
-            if not literal in literals:
-                literals.append(literal)
-    
-    assigned_vars = [var for var, assigned_value in assignments]
-    # now return a list of all the pure literals (a literal is in the list below if it is in the literals list, but it's negated part is not (and it's not already been assigned))
-    return [literal for literal in literals if not -literal in literals and not abs(literal) in assigned_vars]
 
 if __name__ == "__main__":
     main()
