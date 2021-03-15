@@ -11,4 +11,6 @@ cdcl.vsids = VSIDS(4)
 cdcl.original_formula = Formula([Clause(literals) for literals in clauses_array_form])
 cdcl.trail = Trail()
 
-print(cdcl.cdcl_solver())
+#print(cdcl.cdcl_solver())
+for i in range(1, 20):
+    print(cdcl.luby_sequence(i))

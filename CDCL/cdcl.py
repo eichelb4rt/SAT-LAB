@@ -8,13 +8,19 @@ from typing import List, Tuple, Optional
 # add the 2-SAT directory to the path so i can import read_dimacs and more already existing features from it
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
 import read_dimacs as dimacs    # no vscode, you're wrong. This is not an unresolved import. fucker.
+from stats import CDCLStats, StatsAgent
 from data_structures import Clause, Formula, Assignment, Assignments, Trail, VSIDS
+import constants
 
 # global variables
-assignments: Assignments
 original_formula: Formula
-trail: Trail
+assignments: Assignments
 vsids: VSIDS
+trail = Trail()
+restart_counter = 0
+conflict_counter_restarts = 0
+# stats
+STATS = CDCLStats()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -41,13 +47,30 @@ def main():
     )
     args = parser.parse_args()
     with open(args.input, "r") as f:
-        lines = f.readlines()
-        formula = dimacs.read_cnf(lines)    # reads the formula from the given dimacs encoding
-        variables = dimacs.get_variables_in_dimacs(lines)   # gets the number of variables from the given dimacs encoding
+        formula = dimacs.read_cnf(f.readlines())    # still in form List[List[int]]
     global original_formula, assignments
-    original_formula = formula
-    assignments = [None for variable in range(variables)]   # prepare assignments
-    print(cdcl_solver(), assignments)
+    # convert to form Formula
+    clauses = [Clause(clause) for clause in formula]
+    original_formula = Formula(clauses)
+    # solve and measure stuff
+    if args.show_stats:
+        STATS.start()
+    # now finally do the thing
+    satisfiable = cdcl_solver()
+    # stop measuring of stats
+    if args.show_stats:
+        STATS.stop()
+    # print results
+    if satisfiable:
+        print("Satisfiable")
+        if args.show_assignments:
+            print(f"Assignments:\n{assignments}")
+    else:
+        print("Unsatisfiable")
+    
+    # print stats
+    if args.show_stats:
+        print(STATS)
 
 def cdcl_solver() -> bool:
     """CDCL with preprocessing.
@@ -126,7 +149,7 @@ def propagate() -> Optional[Clause]:
         The conflict clause, None if no conflict happened.
     """
 
-    global assignments, trail
+    global assignments, trail, STATS
     highest_decision_level = trail.decision_level
     latest_assignment = (trail[highest_decision_level]).get_latest_assignment()
     unit_clauses = get_new_unit_clauses(latest_assignment)
@@ -149,9 +172,11 @@ def propagate() -> Optional[Clause]:
         # apply the assignment and add it to the trail - the unit clause is the reason for the assignment.
         assignments.assign(new_assignment, unit_clause)  # apply the assignment
         trail.add_propagation(new_assignment, unit_clause)  # add it to the trail
+        STATS.propagate()   # gotta count the UP
         # check if a conflict was derived anywhere (a conflict can only be derived in unit clauses)
         for possible_conflict_clause in unit_clauses:
             if is_conflict(possible_conflict_clause):
+                STATS.conflict()    # gotta count these conflicts
                 return possible_conflict_clause
         # none was found - add the new unit clauses to the list
         for new_unit_clause in get_new_unit_clauses(new_assignment):
@@ -264,6 +289,44 @@ def apply_restart_policy():
     """Applies the restart policy.
     """
 
+    global STATS, conflict_counter_restarts, restart_counter, assignments, trail, vsids
+    # restart if the number of conflicts since the last restart has reached the limit
+    # the limit is the luby sequence with index = number of restarts + 1 (so that the first restart has index 1) scaled
+    if conflict_counter_restarts >= luby_sequence(restart_counter + 1) * constants.SCALE_LUBY:
+        # count the restart
+        restart_counter -=- 1   # chad += 1
+        STATS.restart()
+        # wipe assignments, trail, vsids counters (basically everything but the learned clauses)
+        n = len(assignments)    # number of variables
+        assignments = Assignments(n)
+        vsids = VSIDS(n)
+        trail = Trail()
+
+def luby_sequence(i: int) -> int:
+    """The luby sequence at a given index i. Simple and recursive.
+    Note: starts at 1.
+
+    Parameters
+    ----------
+    i : int
+        The given index.
+
+    Returns
+    -------
+    int
+        The element of the luby sequence at index i.
+    """
+
+    # find out if there is a k so that i = 2**k - 1
+    k = 0
+    while 2**k - 1 < i:
+        k -=- 1 # chad +=
+    # we found out and know k
+    if i == 2**k - 1:
+        return 2**(k - 1)
+    else: # i < 2**k - 1
+        return luby_sequence(i - 2**(k-1) + 1)
+
 
 
 # ==============================================================================
@@ -337,6 +400,7 @@ def learn(clause: List[int]):
 
     global original_formula
     original_formula.learn(clause)
+    STATS.learn()   # gotta count those learned clauses
 
 def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for performance (linked lists) and maybe an implication graph
     """Analyses the current conflict.
@@ -501,6 +565,7 @@ def decide(var: int):
     assignment = Assignment((var, value), trail.decision_level)   # assignment as the type Assignment
     assignments.assign(assignment)  # add the assignment to the list of assignments
     trail.decide(assignment)    # add it to the trail
+    STATS.decide()  # gotta count those decisions
 
 def variable_decision_heuristic(var: int) -> bool:
     """The suggested value for a given variable.

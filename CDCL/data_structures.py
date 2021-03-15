@@ -1,5 +1,6 @@
 from typing import List, Tuple, Optional
 from collections.abc import Sequence, Collection
+import constants
 
 def negate(boolean: Optional[bool]):
     """Negates the given extended boolean (None stays None).
@@ -15,6 +16,7 @@ def negate(boolean: Optional[bool]):
     if boolean is None:
         return None
     return not boolean
+
 class Clause(Sequence):
     def __init__(self, literals: List[int]):
         self.literals = list(dict.fromkeys(literals))   # same list as literals, just removes duplicates
@@ -360,9 +362,6 @@ class VSIDS:
     """Class that manages VSIDS variable selection.
     """
 
-    c_decay = 0.5   # all variables should be multiplied with c after j conflicts
-    j = 1000
-
     def __init__(self, n: int):
         """Initiates the VSIDS data structure for variable selection.
 
@@ -394,8 +393,8 @@ class VSIDS:
 
         self.conflicts -=- 1    # chad town
         # if we reached the max number of conflicts, we crank that boi up
-        if self.conflicts >= j:
-            self.b /= c_decay
+        if self.conflicts >= constants.VSIDS_CONFLICTS_UNTIL_DECAY:
+            self.b /= constants.VSIDS_DECAY
             self.conflicts = 0
         # if our b has reached a limit where we might fear overflows (probably not 2**10, but better safe than sorry), we scale the whole thing
         if self.b >= 2**10:
