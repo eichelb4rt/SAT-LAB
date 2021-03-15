@@ -34,6 +34,24 @@ class StatsAgent:
     
     def __str__(self):
         return tabulate([[measurement.format_name, measurement.format_value] for measurement in self.measurements])
+    
+    def get_measurement_by_name(self, name: str) -> Measurement:
+        """Gets one of the measurements by its unique name.
+
+        Parameters
+        ----------
+        name : str
+            The given name.
+
+        Returns
+        -------
+        Measurement
+            The named measurement.
+        """
+
+        for measurement in self.measurements:
+            if name == measurement.format_name:
+                return measurement
 
 class SolverStats(StatsAgent):
     def __init__(self, extra_measurements = []):

@@ -4,4 +4,4 @@ VSIDS_CONFLICTS_UNTIL_DECAY = 1000
 WATCHED_LITERALS = True
 VSIDS = True
 DECISION_HEURISTIC = True
-LEARN_UIP = True    # also decides if we're backtracking to the asserting decision level or not
+LEARN_UIP = False    # also decides if we're backtracking to the asserting decision level or not

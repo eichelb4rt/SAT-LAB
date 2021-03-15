@@ -16,6 +16,18 @@ import dpll_mf
 import two_sat
 
 class Solver(ABC):
+
+    def __init__(self):
+        self.stats_overall = [] # records the stats over time
+    
+    def stop_time(self):
+        time_passed = self.stats_run.get_measurement_by_name("Process Time").value
+        if len(self.stats_overall) == 0:
+            self.stats_overall.append(time_passed)
+        else:
+            last_time = self.stats_overall[len(self.stats_overall) - 1]
+            self.stats_overall.append(time_passed + last_time)
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -44,8 +56,8 @@ class Solver(ABC):
     
     @property
     @abstractmethod
-    def stats(self) -> SolverStats:
-        """Returns the StatsAgent for the stats.
+    def stats_run(self) -> SolverStats:
+        """Returns the StatsAgent for the stats. Note that it only carries the stats after 1 run.
 
         Returns
         -------
@@ -53,7 +65,7 @@ class Solver(ABC):
             The StatsAgent.
         """
 
-class CDCLSolver:
+class CDCLSolver(Solver):
     @property
     def name(self) -> str:
         return "CDCL"
@@ -62,10 +74,10 @@ class CDCLSolver:
         return cdcl.solve_input(input)
     
     @property
-    def stats(self) -> CDCLStats:
+    def stats_run(self) -> CDCLStats:
         return cdcl.STATS
 
-class DPLLMFSolver:
+class DPLLMFSolver(Solver):
     @property
     def name(self) -> str:
         return "DPLL memory-friendly"
@@ -74,10 +86,10 @@ class DPLLMFSolver:
         return dpll_mf.solve_input(input)
     
     @property
-    def stats(self) -> DPLLStats:
+    def stats_run(self) -> DPLLStats:
         return dpll_mf.STATS
 
-class DPLLSolver:
+class DPLLSolver(Solver):
     @property
     def name(self) -> str:
         return "DPLL recursive"
@@ -86,10 +98,10 @@ class DPLLSolver:
         return dpll.solve_input(input)
     
     @property
-    def stats(self) -> DPLLStats:
+    def stats_run(self) -> DPLLStats:
         return dpll.STATS
 
-class TwoSatSolver:
+class TwoSatSolver(Solver):
     @property
     def name(self) -> str:
         return "2-SAT"
@@ -98,20 +110,7 @@ class TwoSatSolver:
         return two_sat.solve_input(input)
     
     @property
-    def stats(self) -> TwoSatStats:
+    def stats_run(self) -> TwoSatStats:
         return two_sat.STATS
 
-cnfs_folder = "../random-cnf/out/"
-files = os.listdir(cnfs_folder)
 solvers = [DPLLSolver(), DPLLMFSolver(), CDCLSolver()]
-for solver in solvers:
-    print("================================================================")
-    print(solver.name)
-    print("================================================================")
-    for file in files:
-        path = cnfs_folder + file
-        print("================================")
-        print(path)
-        print("================================")
-        print(solver.solve(path))
-        print(solver.stats)

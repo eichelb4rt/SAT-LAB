@@ -1,9 +1,9 @@
 #!/bin/bash
 # SHEBANG
 
-t=50
-n=5
-c=25
+t=20
+n=20
+c=100
 k=3
 random_cnf_dir="../random-cnf"
 random_cnf_tool="$random_cnf_dir/random-cnf.py"
@@ -16,7 +16,7 @@ cdcl="../CDCL/cdcl.py"
 
 "$random_cnf_tool" "$t" "$n" "$c" "$k" -o "$out" || exit 1
 
-solver="$dpll"
+solver="$cdcl"
 i=0
 satisfiable_count=0
 unsatisfiable_count=0

@@ -181,10 +181,11 @@ def propagate() -> Optional[Clause]:
     global assignments, trail, STATS
     highest_decision_level = trail.decision_level
     latest_assignment = (trail[highest_decision_level]).get_latest_assignment()
-    unit_clauses = deque(get_new_unit_clauses(latest_assignment))
+    unit_clauses = get_new_unit_clauses(latest_assignment)
     # propagate until a conflict is derived or we have no unit clauses left
     while unit_clauses:
-        unit_clause = unit_clauses.popleft()
+        unit_clause = random.choice(unit_clauses)   # pick a random unit clause
+        unit_clauses.remove(unit_clause)    # and remove it from the list
         # figure out the only unassigned literal in the unit clause
         unit = None
         for literal in unit_clause.watched_literals:
@@ -192,7 +193,7 @@ def propagate() -> Optional[Clause]:
                 unit = literal  # unit is the only unassigned literal in the clause
         # !!! the unit clause could have been satisfied because of another unit clause already !!! (rare tho?)
         if not unit:    # if the clause doesn't have an unassigned literal anymore (if it was satisfied, because conflicts are caught earlier on, when the assignment is applied)
-            continue    # unit clause was already removed by popleft()
+            continue    # unit clause was already removed
         # figure out the assignment to satisfy the unit
         var = abs(unit)
         value = True if unit > 0 else False
@@ -207,7 +208,7 @@ def propagate() -> Optional[Clause]:
                 STATS.conflict()    # gotta count these conflicts
                 return possible_conflict_clause
         # none was found - add the new unit clauses to the list
-        unit_clauses.extend(get_new_unit_clauses(new_assignment))
+        unit_clauses += get_new_unit_clauses(new_assignment)
         # go again with another unit clause
     # there are no more unit clauses left and no conflict was derived
     return None
@@ -367,20 +368,15 @@ def backtrack(clause: List[int]):
         The learned clause.
     """
 
-    # only use this method if UIP learning is turned on
-    if not config.LEARN_UIP:
-        return basic_backtrack(clause)
-    # here the actual method
-
     global assignments, trail, STATS
     # find out the asserting level: the max decision level that includes learned literals. The highest decision level is excluded!
     asserting_level = 0
     for literal in clause:
         level = assignments.decision_level(abs(literal))
-        if level > asserting_level and level != trail.decision_level:
+        if not level is None and level > asserting_level and level != trail.decision_level:
             asserting_level = level
     backtrack_to(asserting_level)
-    # since we learned the 1UIP and we jumped to the asserting level, we can safely satisfy the learned clause with unit propagation
+    # since we learned the an asserting clause and we jumped to the asserting level, we can safely satisfy the learned clause with unit propagation
     # first of all find out which one of the variables is now going to be propagated
     unit = 0
     for literal in clause:
@@ -582,15 +578,18 @@ def select_variable() -> Optional[int]:
     # here the actual method
     
     global vsids, assignments
-    max_index = None   # index of the variable with the max counter
-    max_counter = -1 # max counter
+    max_indices = []    # indices of the variables with the highest counter
+    max_counter = -1    # max counter
     for index, counter in enumerate(vsids.counters):
         # if there's a higher scoring variable that is not assigned yet, we prefer it
-        if counter > max_counter and assignments[index + 1] is None:    # index (x) -> variable (x + 1)
-            max_index = index
-            max_counter = counter
-    if not max_index is None:
-        return max_index + 1   # index (x) -> variable (x + 1)
+        if assignments[index + 1] is None:  # only look at unassigned variables
+            if counter > max_counter:   # higher counter
+                max_indices = [index]   # all the previous max indices are now not max anymore
+                max_counter = counter   # update counter
+            elif counter == max_counter:    # if there's a variable with the same score, add it to the list of max scoring variables
+                max_indices.append(index)
+    if len(max_indices) != 0:
+        return random.choice(max_indices) + 1   # index (x) -> variable (x + 1)
     return None
 
 def decide(var: int):
@@ -761,40 +760,6 @@ def basic_is_conflict(clause: Clause) -> bool:
         if not assignments.value(literal) is False:
             return False    # one of the watched literals is not False -> no conflict
     return True
-
-def basic_backtrack(clause: List[int]):
-    """Changes trail and decision level for non-chronological backtracking depending on the learned clause.
-
-    Parameters
-    ----------
-    clause : List[int]
-        The learned clause.
-    """
-
-    global trail
-    basic_backtrack_to(trail.decision_level - 1)    # yeah we don't even care about the clause. We're wandering through our lives without care!
-
-def basic_backtrack_to(level: int):
-    """Changes trail and decision level for backtracking to the given level.
-
-    Parameters
-    ----------
-    level : int
-        The given level.
-    """
-
-    global assignments, trail
-
-    # unassign variables in higher levels
-    for decision_level in trail[level + 1:]:    # includes level + 1 , ... , highest decision level
-        for assignment in decision_level.assignments: # the assignments on the decision level
-            del assignments[assignment.var] # unassign the variable
-    # unassign all the propagated variables
-    for propagation in trail[level].propagations:
-        del assignments[propagation.assignment.var]
-    # reset trail
-    trail.trail = trail.trail[:level + 1]   # erase higher levels
-    trail[level].propagations = []  # erase all propagated variables
 
 def basic_analyse_conflict(conflict_clause: Clause) -> Clause:
     """Analyses the current conflict. Very basic.
