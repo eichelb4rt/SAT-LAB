@@ -380,11 +380,13 @@ def backtrack_to(level: int):
     """
 
     global assignments, trail
-
+    # we want to unassign every variable that is assigned after the decision on our backtracked decision level
     # unassign variables
-    for decision_level in trail[level + 1:]:    # includes level + 1 , ... , highest decision level
+    for index, decision_level in enumerate(trail[level:]):    # includes level , level + 1 , ... , highest decision level
         for assignment in decision_level.assignments: # the assignments on the decision level
-            del assignments[assignment.var] # unassign the variable
+            decision = assignments.reason(assignment.var) is None   # figure out if the assignment was a decision
+            if not (decision and index == 0):   # the only assignment we do not want to remove is the decision at the level that we backtracked to
+                del assignments[assignment.var] # unassign the variable
     # reset trail
     trail.backtrack(level)
 

@@ -10,6 +10,6 @@ cdcl.assignments = Assignments(4)
 cdcl.vsids = VSIDS(4)
 cdcl.original_formula = Formula([Clause(literals) for literals in clauses_array_form])
 cdcl.trail = Trail()
+cdcl.STATS.start()
 
-assignment = Assignment((1, True), 0)
-print(assignment)
+print(cdcl.cdcl_solver())
