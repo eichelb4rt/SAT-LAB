@@ -289,7 +289,7 @@ class DecisionLevel:
             The list of assignments applied on this decision level (decision + propagations).
         """
 
-        assignments = [propagation.assignment for propagation in self.propagations]    # propagation is of type (assignment, clause)
+        assignments = [propagation.assignment for propagation in self.propagations]    # propagation is of type (assignment, clause) 
         if not self.decision is None:
             assignments.append(self.decision)
         return assignments
@@ -361,9 +361,7 @@ class Trail(Sequence):
             The given level.
         """
 
-        self.trail = self.trail[:level + 1] # keeps every decision level before level, removes everything else
-        self.trail[level].propagations = [] # keep only the decision on the level that we backtracked to
-
+        self.trail = self.trail[:level + 1]   # keeps every decision level before level, removes everything else
 class VSIDS:
     """Class that manages VSIDS variable selection.
     """

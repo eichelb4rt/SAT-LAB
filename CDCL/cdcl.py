@@ -347,28 +347,30 @@ def backtrack(clause: List[int]):
         The learned clause.
     """
 
-    global assignments, trail
-    # if the clause is a unit clause, we instantly backtrack to the 0th decision level and satisfy the unit clause
-    if len(clause) == 1:
-        # backtrack to 0
-        backtrack_to(0)
-        # satisfy the unit clause
-        unit = clause[0]    # the only literal in the clause
-        # figure out the assignment to satisfy the unit
-        var = abs(unit)
-        value = True if unit > 0 else False
-        # assign the literal
-        new_assignment = Assignment((var, value), trail.decision_level)
-        assignments.assign(new_assignment, clause)  # apply the assignment
-        trail.add_propagation(new_assignment, clause)  # add it to the trail
-    else:
-        # find out the asserting level: the max decision level that includes learned literals. The highest decision level is excluded!
-        max_level = 0
-        for literal in clause:
-            level = assignments.decision_level(abs(literal))
-            if level > max_level and level != trail.decision_level:
-                max_level = level
-        backtrack_to(level)
+    global assignments, trail, STATS
+    # find out the asserting level: the max decision level that includes learned literals. The highest decision level is excluded!
+    asserting_level = 0
+    for literal in clause:
+        level = assignments.decision_level(abs(literal))
+        if level > asserting_level and level != trail.decision_level:
+            asserting_level = level
+    backtrack_to(asserting_level)
+    # since we learned the 1UIP and we jumped to the asserting level, we can safely satisfy the learned clause with unit propagation
+    # first of all find out which one of the variables is now going to be propagated
+    unit = 0
+    for literal in clause:
+        if assignments[abs(literal)] is None:
+            unit = literal
+    # satisfy the unit clause
+    # figure out the assignment to satisfy the unit
+    var = abs(unit)
+    value = True if unit > 0 else False
+    # assign the literal on the asserting decision level
+    new_assignment = Assignment((var, value), asserting_level)
+    assignments.assign(new_assignment, clause)  # apply the assignment
+    trail.add_propagation(new_assignment, clause)  # add it to the trail
+    STATS.propagate()
+        
 
 def backtrack_to(level: int):
     """Changes trail and decision level for backtracking to the given level.
@@ -380,13 +382,11 @@ def backtrack_to(level: int):
     """
 
     global assignments, trail
-    # we want to unassign every variable that is assigned after the decision on our backtracked decision level
+
     # unassign variables
-    for index, decision_level in enumerate(trail[level:]):    # includes level , level + 1 , ... , highest decision level
+    for decision_level in trail[level + 1:]:    # includes level + 1 , ... , highest decision level
         for assignment in decision_level.assignments: # the assignments on the decision level
-            decision = assignments.reason(assignment.var) is None   # figure out if the assignment was a decision
-            if not (decision and index == 0):   # the only assignment we do not want to remove is the decision at the level that we backtracked to
-                del assignments[assignment.var] # unassign the variable
+            del assignments[assignment.var] # unassign the variable
     # reset trail
     trail.backtrack(level)
 
