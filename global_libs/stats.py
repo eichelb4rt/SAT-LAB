@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from measurements import Measurement, MeasureTime, PeakMemory, Propagations, Decisions, Conflicts
+from measurements import Measurement, MeasureTime, PeakMemory, Propagations, Decisions, Conflicts, LearnedClauses, Restarts
 from tabulate import tabulate
 from typing import List
 
@@ -35,14 +35,14 @@ class StatsAgent:
     def __str__(self):
         return tabulate([[measurement.format_name, measurement.format_value] for measurement in self.measurements])
 
-class DPLLStats(StatsAgent):
-    def __init__(self):
-        """Initiates agent for dpll.
+class SolverStats(StatsAgent):
+    def __init__(self, extra_measurements = []):
+        """Initiates agent for a generic solver.
         """
 
         self.propagations = Propagations()
         self.decisions = Decisions()
-        super().__init__([MeasureTime(), PeakMemory(), self.propagations, self.decisions])
+        super().__init__([MeasureTime(), PeakMemory(), self.propagations, self.decisions] + extra_measurements)
     
     def propagate(self):
         """Increments the number of propagations.
@@ -56,51 +56,40 @@ class DPLLStats(StatsAgent):
 
         self.decisions.increment()
 
-class TwoSatStats(StatsAgent):
+class DPLLStats(SolverStats):
+    pass    # literally just SolverStats
+
+class TwoSatStats(SolverStats):
+    pass    # literally just SolverStats
+
+class CDCLStats(SolverStats):
     def __init__(self):
         """Initiates agent for dpll.
         """
 
-        self.propagations = Propagations()
-        self.decisions = Decisions()
-        super().__init__([MeasureTime(), PeakMemory(), self.propagations, self.decisions])
-    
-    def propagate(self):
-        """Increments the number of propagations.
-        """
-
-        self.propagations.increment()
-    
-    def decide(self):
-        """Increments the number of decisions.
-        """
-
-        self.decisions.increment()
-
-class CDCLStats(StatsAgent):
-    def __init__(self):
-        """Initiates agent for dpll.
-        """
-
-        self.propagations = Propagations()
-        self.decisions = Decisions()
         self.conflicts = Conflicts()
-        super().__init__([MeasureTime(), PeakMemory(), self.propagations, self.decisions, self.conflicts()])
+        self.learned_clauses = LearnedClauses()
+        self.restarts = Restarts()
+        super().__init__([
+            self.conflicts,
+            self.learned_clauses,
+            self.restarts
+        ])
     
-    def propagate(self):
-        """Increments the number of propagations.
-        """
-
-        self.propagations.increment()
-    
-    def decide(self):
-        """Increments the number of decisions.
-        """
-
-        self.decisions.increment()
-    
-    def add_conflict(self):
+    def conflict(self):
         """Increments the number of conflicts.
         """
 
         self.conflicts.increment()
+    
+    def learn(self):
+        """Increments the number of learned clauses.
+        """
+
+        self.learned_clauses.increment()
+    
+    def restart(self):
+        """Increments the number of restarts.
+        """
+
+        self.restarts.increment()

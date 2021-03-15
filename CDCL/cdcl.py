@@ -4,13 +4,15 @@
 import os, sys, argparse
 from copy import deepcopy, copy
 from typing import List, Tuple, Optional
+from collections import deque
+import random
 
 # add the 2-SAT directory to the path so i can import read_dimacs and more already existing features from it
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
 import read_dimacs as dimacs    # no vscode, you're wrong. This is not an unresolved import. fucker.
 from stats import CDCLStats, StatsAgent
 from data_structures import Clause, Formula, Assignment, Assignments, Trail, VSIDS
-import constants
+import config
 
 # global variables
 original_formula: Formula
@@ -46,25 +48,10 @@ def main():
         help = 'Show the stats (memory usage, time).'
     )
     args = parser.parse_args()
-    with open(args.input, "r") as f:
-        lines = f.readlines()
-        formula = dimacs.read_cnf(lines)    # still in form List[List[int]]
-        n = dimacs.get_variables_in_dimacs(lines)   # number of variables
-    global original_formula, assignments, vsids
-    # convert to form Formula
-    clauses = [Clause(clause) for clause in formula]
-    original_formula = Formula(clauses)
-    # instantiate assignments and vsids
-    assignments = Assignments(n)
-    vsids = VSIDS(n)
-    # solve and measure stuff
-    if args.show_stats:
-        STATS.start()
-    # now finally do the thing
-    satisfiable = cdcl_solver()
-    # stop measuring of stats
-    if args.show_stats:
-        STATS.stop()
+
+    global STATS
+    # solve the thing
+    satisfiable = solve_input(args.input)
     # print results
     if satisfiable:
         print("Satisfiable")
@@ -72,10 +59,42 @@ def main():
             print(f"Assignments:\n{assignments}")
     else:
         print("Unsatisfiable")
-    
     # print stats
     if args.show_stats:
         print(STATS)
+
+def solve_input(input: str) -> bool:
+    """Solves SAT for a given input file with a CNF in dimacs and measures stats.
+
+    Parameters
+    ----------
+    input : str
+        The dimacs encoded file.
+
+    Returns
+    -------
+    bool
+        True if formula is satisfiable, False otherwise.
+    """
+
+    with open(input, "r") as f:
+        lines = f.readlines()
+        formula = dimacs.read_cnf(lines)    # still in form List[List[int]]
+        n = dimacs.get_variables_in_dimacs(lines)   # number of variables
+    global original_formula, assignments, vsids, STATS
+    # convert to form Formula
+    clauses = [Clause(clause) for clause in formula]
+    original_formula = Formula(clauses)
+    # instantiate assignments and vsids
+    assignments = Assignments(n)
+    vsids = VSIDS(n)
+    # start measuring stuff
+    STATS.start()
+    # do the thing
+    satisfiable = cdcl_solver()
+    # stop measuring stats
+    STATS.stop()
+    return satisfiable
 
 def cdcl_solver() -> bool:
     """CDCL with preprocessing.
@@ -154,13 +173,18 @@ def propagate() -> Optional[Clause]:
         The conflict clause, None if no conflict happened.
     """
 
+    # only use this method if watched literals are turned on
+    if not config.WATCHED_LITERALS:
+        return basic_propagate()
+    # here the actual method
+    
     global assignments, trail, STATS
     highest_decision_level = trail.decision_level
     latest_assignment = (trail[highest_decision_level]).get_latest_assignment()
-    unit_clauses = get_new_unit_clauses(latest_assignment)
+    unit_clauses = deque(get_new_unit_clauses(latest_assignment))
     # propagate until a conflict is derived or we have no unit clauses left
-    while len(unit_clauses) != 0:
-        unit_clause = unit_clauses[0]   # take the first unit clause
+    while unit_clauses:
+        unit_clause = unit_clauses.popleft()
         # figure out the only unassigned literal in the unit clause
         unit = None
         for literal in unit_clause.watched_literals:
@@ -168,8 +192,7 @@ def propagate() -> Optional[Clause]:
                 unit = literal  # unit is the only unassigned literal in the clause
         # !!! the unit clause could have been satisfied because of another unit clause already !!! (rare tho?)
         if not unit:    # if the clause doesn't have an unassigned literal anymore (if it was satisfied, because conflicts are caught earlier on, when the assignment is applied)
-            unit_clauses.remove(unit_clause)
-            continue
+            continue    # unit clause was already removed by popleft()
         # figure out the assignment to satisfy the unit
         var = abs(unit)
         value = True if unit > 0 else False
@@ -184,10 +207,7 @@ def propagate() -> Optional[Clause]:
                 STATS.conflict()    # gotta count these conflicts
                 return possible_conflict_clause
         # none was found - add the new unit clauses to the list
-        for new_unit_clause in get_new_unit_clauses(new_assignment):
-            unit_clauses.append(new_unit_clause)
-        # remove the satisfied unit clause from the list
-        unit_clauses.remove(unit_clause)
+        unit_clauses.extend(get_new_unit_clauses(new_assignment))
         # go again with another unit clause
     # there are no more unit clauses left and no conflict was derived
     return None
@@ -297,7 +317,7 @@ def apply_restart_policy():
     global STATS, conflict_counter_restarts, restart_counter, assignments, trail, vsids
     # restart if the number of conflicts since the last restart has reached the limit
     # the limit is the luby sequence with index = number of restarts + 1 (so that the first restart has index 1) scaled
-    if conflict_counter_restarts >= luby_sequence(restart_counter + 1) * constants.SCALE_LUBY:
+    if conflict_counter_restarts >= luby_sequence(restart_counter + 1) * config.SCALE_LUBY:
         # count the restart
         restart_counter -=- 1   # chad += 1
         STATS.restart()
@@ -346,6 +366,11 @@ def backtrack(clause: List[int]):
     clause : List[int]
         The learned clause.
     """
+
+    # only use this method if UIP learning is turned on
+    if not config.LEARN_UIP:
+        return basic_backtrack(clause)
+    # here the actual method
 
     global assignments, trail, STATS
     # find out the asserting level: the max decision level that includes learned literals. The highest decision level is excluded!
@@ -409,7 +434,7 @@ def learn(clause: List[int]):
     original_formula.learn(clause)
     STATS.learn()   # gotta count those learned clauses
 
-def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for performance (linked lists) and maybe an implication graph
+def analyse_conflict(conflict_clause: Clause) -> Clause:
     """Analyses the current conflict.
 
     Parameters
@@ -423,43 +448,46 @@ def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for p
         The clause to be learned.
     """
 
+    # only use this method if UIP learning is turned on
+    if not config.LEARN_UIP:
+        return basic_analyse_conflict(conflict_clause)
+    # here the actual method
+
     global trail
     assignments_on_decision_level = trail[trail.decision_level].assignments
     #variables_on_decision_level = [assignment.var for assignment in assignments_on_decision_level]
     cut = conflict_clause   # initiate the cut with the conflict clause
     conflict_zone = []  # the variables in the conflict zone of the cut
     imp_graph = implication_graph_on_decision_level()   # the implication graph only on the highest decision level
-    dec_vars = variables_on_decision_level(cut, trail.decision_level)   # dec_vars is now the list of variables on the last decision level (in the cut)
+    dec_vars = deque(variables_on_decision_level(cut, trail.decision_level))   # dec_vars is now the list of variables on the last decision level (in the cut)
     while len(dec_vars) > 1:    # while there is more than 1 literal on the highest decision level in the current clause, keep going
-        pivot = dec_vars[0] # the first variable in the list will be our pivot
+        pivot = dec_vars.popleft()  # the first variable in the list will be our pivot
         # now check if the pivot can reach any other variables in the cut
         # we do this with DF search:
         others_reachable = False
-        open_list = [pivot] # initiate the open list (nodes to be expanded)
+        open_list = deque([pivot]) # initiate the open list (nodes to be expanded)
         while open_list:    # while there are nodes in the open list
-            node = open_list[len(open_list) - 1] # node to be expanded - the last node in the list (we append new nodes at the end)
+            node = open_list.popleft() # node to be expanded - the first node in the list (we append new nodes at the end)
             if node in conflict_zone:
-                open_list.remove(node)  # we don't need to look past the cut
-            elif not node is pivot and node in dec_vars:    # if a node is in the cut and is not the pivot itself
+                pass    # node stays removed
+                # we don't need to look past the cut
+            elif not node is pivot and node in dec_vars:    # if a node is in the cut and is not the pivot itself (not node is pivot is actually not needed here, because popleft() removes it from the list, but this makes a bit clearer that this might be needed if we change the implementation)
                 others_reachable = True # then another variable in the cut is reachable
                 break
             else:   # node is not in cut and not in conflict zone -> expand it
-                open_list.remove(node)  # remove the node
-                # append it's direct successors
-                open_list += imp_graph[node]
+                # node is already removed from the start
+                open_list.extend(imp_graph[node])   # append it's direct successors
         # we found out if other variables in the cut are reachable from the pivot
         if others_reachable:
             # go to the end of the queue!
             dec_vars.append(pivot)
-            dec_vars.remove(pivot)
             continue    # and look at the next variable - continue is actually not needed here, just for readability
         else:   # we can't reach any variables outside the cut if we add this to the cut, so let's just do that shall
             reason = assignments.reason(pivot)  # reason clause for assignment of pivot
             cut = resolve(cut, reason, pivot)    # resolve the reason with the cut
             new_decision_variables = variables_on_decision_level(reason, trail.decision_level)  # the new variables that are now in the cut on the highest decision level
-            new_decision_variables = [variable for variable in new_decision_variables if variable not in dec_vars]    # only add actually new variables. we do not want duplicates.
-            dec_vars += new_decision_variables  # add the new decision variables
-            dec_vars.remove(pivot)  # remove the expanded variable from the variables to be expanded
+            new_decision_variables = [variable for variable in new_decision_variables if variable not in dec_vars and not variable is pivot]    # only add actually new variables. we do not want duplicates.
+            dec_vars.extendleft(new_decision_variables)  # add the new decision variables on the left (the ones on the right could reach other variables in our cut before and probably still can)
             conflict_zone.append(pivot) # the pivot is now in the conflict zone
     # we resolved until there was only 1 literal on the highest decision level left. This is the 1UP. This is the way.
     return cut
@@ -539,24 +567,31 @@ def variables_on_decision_level(clause: Clause, level: int) -> List[int]:
 # ================================ decisions ================================
 # ===========================================================================
 
-def select_variable() -> int:
+def select_variable() -> Optional[int]:
     """Decides which variable to select for a decision.
 
     Returns
     -------
-    int
-        The selected variable.
+    Optional[int]
+        The selected variable. None if every variable is assigned.
     """
 
+    # only use this method if watched literals are turned on
+    if not config.VSIDS:
+        return basic_selection()
+    # here the actual method
+    
     global vsids, assignments
-    max_index = 0   # index of the variable with the max counter
+    max_index = None   # index of the variable with the max counter
     max_counter = -1 # max counter
     for index, counter in enumerate(vsids.counters):
         # if there's a higher scoring variable that is not assigned yet, we prefer it
         if counter > max_counter and assignments[index + 1] is None:    # index (x) -> variable (x + 1)
             max_index = index
             max_counter = counter
-    return max_index + 1   # index (x) -> variable (x + 1)
+    if not max_index is None:
+        return max_index + 1   # index (x) -> variable (x + 1)
+    return None
 
 def decide(var: int):
     """Decides the value of a given variable and adds the assignment to the trail.
@@ -588,12 +623,200 @@ def variable_decision_heuristic(var: int) -> bool:
         The suggested value for the variable assignment.
     """
 
+    # only use this method if the variable decision heuristic is turned on
+    if not config.DECISION_HEURISTIC:
+        return basic_decision(var)
+    # here the actual method
+    
     global assignments
     # we want to maintain the last assignment
     if assignments.last_assignment(var) is None:
         return True
     else:
         return assignments.last_assignment(var)
+
+
+
+# =======================================================================================
+# ================================ basic implementations ================================
+# =======================================================================================
+
+def basic_decision(var: int) -> bool:
+    """The suggested value for a given variable. Picks randomly.
+
+    Parameters
+    ----------
+    var : int
+        The given variable.
+
+    Returns
+    -------
+    bool
+        The suggested decision.
+    """
+
+    return random.choice([True, False])
+
+def basic_selection() -> Optional[int]:
+    """Decides which variable to select for a decision. Very basic.
+
+    Returns
+    -------
+    Optional[int]
+        The selected variable. None if every variable is assigned.
+    """
+
+    global assignments
+    for assignment in assignments.assignment_view:
+        if assignment.value is None:
+            return assignment.var
+    return None
+
+def basic_propagate() -> Optional[Clause]:
+    """Basic unit propagation until a conflict is derived.
+
+    Returns
+    -------
+    Optional[Clause]
+        The conflict clause, None if no conflict happened.
+    """
+
+    global assignments, trail, STATS
+    # propagate until a conflict is derived or we have no unit clauses left
+    while unit_clauses := basic_get_unit_clauses():
+        unit_clause = unit_clauses[0]
+        # figure out the only unassigned literal in the unit clause
+        unit = None
+        for literal in unit_clause:
+            if assignments.value(literal) is None:
+                unit = literal  # unit is the only unassigned literal in the clause
+        # figure out the assignment to satisfy the unit
+        var = abs(unit)
+        value = True if unit > 0 else False
+        new_assignment = Assignment((var, value), trail.decision_level)
+        # apply the assignment and add it to the trail - the unit clause is the reason for the assignment.
+        assignments.assign(new_assignment, unit_clause)  # apply the assignment
+        trail.add_propagation(new_assignment, unit_clause)  # add it to the trail
+        STATS.propagate()   # gotta count the UP
+        # check if a conflict was derived anywhere (a conflict can only be derived in unit clauses)
+        for possible_conflict_clause in unit_clauses:
+            if basic_is_conflict(possible_conflict_clause):
+                STATS.conflict()    # gotta count these conflicts
+                return possible_conflict_clause
+        # go again with another unit clause
+    # there are no more unit clauses left and no conflict was derived
+    return None
+
+def basic_get_unit_clauses() -> List[Clause]:
+    """Gets unit clauses in a very basic way without watched literals.
+
+    Returns
+    -------
+    List[Clause]
+        The clauses that are unit under the current assignment.
+    """
+
+    global original_formula
+    return [clause for clause in original_formula if basic_is_unit(clause)]
+
+def basic_is_unit(clause: Clause) -> bool:
+    """Basic check if the clause is unit under the current assignment.
+
+    Parameters
+    ----------
+    clause : Clause
+        The given clause.
+
+    Returns
+    -------
+    bool
+        True if the clause is unit, False otherwise.
+    """
+
+    global assignments
+    unassigned_literals = [literal for literal in clause if assignments.value(literal) is None]
+    has_satisfied_literal = False
+    for literal in clause:
+        if assignments.value(literal) is True:
+            has_satisfied_literal = True
+            break
+    return not has_satisfied_literal and len(unassigned_literals) == 1  # if we only have 1 unassigned literal and no satisfied literals, it's unit
+
+def basic_is_conflict(clause: Clause) -> bool:
+    """Checks if the given clause is a conflict under the current assignment or not (without watched literals).
+
+    Parameters
+    ----------
+    clause : Clause
+        The given clause.
+
+    Returns
+    -------
+    bool
+        True if the clause is a conflict under the current assignment, False otherwise.
+    """
+
+    global assignments
+    for literal in clause: # the clause is a conflict if and only if both watched literals are false
+        if not assignments.value(literal) is False:
+            return False    # one of the watched literals is not False -> no conflict
+    return True
+
+def basic_backtrack(clause: List[int]):
+    """Changes trail and decision level for non-chronological backtracking depending on the learned clause.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The learned clause.
+    """
+
+    global trail
+    basic_backtrack_to(trail.decision_level - 1)    # yeah we don't even care about the clause. We're wandering through our lives without care!
+
+def basic_backtrack_to(level: int):
+    """Changes trail and decision level for backtracking to the given level.
+
+    Parameters
+    ----------
+    level : int
+        The given level.
+    """
+
+    global assignments, trail
+
+    # unassign variables in higher levels
+    for decision_level in trail[level + 1:]:    # includes level + 1 , ... , highest decision level
+        for assignment in decision_level.assignments: # the assignments on the decision level
+            del assignments[assignment.var] # unassign the variable
+    # unassign all the propagated variables
+    for propagation in trail[level].propagations:
+        del assignments[propagation.assignment.var]
+    # reset trail
+    trail.trail = trail.trail[:level + 1]   # erase higher levels
+    trail[level].propagations = []  # erase all propagated variables
+
+def basic_analyse_conflict(conflict_clause: Clause) -> Clause:
+    """Analyses the current conflict. Very basic.
+
+    Parameters
+    ----------
+    conflict_clause : Clause
+        The conflict that was just found.
+
+    Returns
+    -------
+    Clause
+        The clause to be learned.
+    """
+
+    global trail
+    learned_literals = []
+    for level in trail:
+        if level.decision:  # not 0th decision level
+            literal_learned = -level.decision.var if level.decision.value else level.decision.var
+            learned_literals.append(literal_learned)
+    return Clause(learned_literals)
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,8 @@ from stats import TwoSatStats, StatsAgent
 
 # global instance of the stats agent (const)
 STATS = TwoSatStats()
+# global instance of assignments since solve_input should only return satisfiablity and we somehow need the assignments anyway
+global_assignments = []
 
 def main():
     parser = argparse.ArgumentParser()
@@ -42,7 +44,35 @@ def main():
         help = 'Show the stats (memory usage, time).'
     )
     args = parser.parse_args()
-    with open(args.input, "r") as new_f:
+    global STATS, global_assignments
+
+    satisfiable = solve_input(args.input)
+    # print results
+    if satisfiable:
+        print("Satisfiable")
+        if args.show_assignments:
+            print(f"Assignments:\n{global_assignments}")
+    else:
+        print("Unsatisfiable")
+    # print stats
+    if args.show_stats:
+        print(STATS)
+
+def solve_input(input: str) -> bool:
+    """Solves SAT for a given input file with a CNF in dimacs and measures stats.
+
+    Parameters
+    ----------
+    input : str
+        The dimacs encoded file.
+
+    Returns
+    -------
+    bool
+        True if formula is satisfiable, False otherwise.
+    """
+
+    with open(input, "r") as new_f:
         formula = dimacs.read_cnf(new_f.readlines())
     for clause in formula:
         # check if it follows the rules like a good boi
@@ -51,26 +81,14 @@ def main():
             sys.exit(1)
     
     # prepare measuring of stats
-    global STATS
-    if args.show_stats:
-        STATS.start()
+    global STATS, global_assignments
+    STATS.start()
     # now finally do the thing
     satisfiable, assignments = two_sat(formula)
     # stop measuring of stats
-    if args.show_stats:
-        STATS.stop()
-
-    # print results
-    if satisfiable:
-        print("Satisfiable")
-        if args.show_assignments:
-            print(f"Assignments:\n{assignments}")
-    else:
-        print("Unsatisfiable")
-    
-    # print stats
-    if args.show_stats:
-        print(STATS)
+    STATS.stop()
+    global_assignments = assignments
+    return satisfiable
 
 def two_sat(f: List[List[int]]) -> (bool, List[Tuple[int, bool]]):
     """Applies the 2-SAT algorithm to the given formula f.

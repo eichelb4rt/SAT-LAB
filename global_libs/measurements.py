@@ -145,3 +145,13 @@ class Conflicts(Counter):
     @property
     def format_name(self) -> str:
         return "Number of Conflicts"
+
+class LearnedClauses(Counter):
+    @property
+    def format_name(self) -> str:
+        return "Number of Learned Clauses"
+
+class Restarts(Counter):
+    @property
+    def format_name(self) -> str:
+        return "Number of Restarts"

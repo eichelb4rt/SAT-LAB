@@ -44,18 +44,10 @@ def main():
         help = 'Show the stats (memory usage, time).'
     )
     args = parser.parse_args()
-    with open(args.input, "r") as f:
-        formula = dimacs.read_cnf(f.readlines())
-    global original_formula, assignments
-    original_formula = formula
-    # solve and measure stuff
-    if args.show_stats:
-        STATS.start()
-    # now finally do the thing
-    satisfiable = dpll_solver()
-    # stop measuring of stats
-    if args.show_stats:
-        STATS.stop()
+
+    global STATS
+    # solve the thing
+    satisfiable = solve_input(args.input)
     # print results
     if satisfiable:
         print("Satisfiable")
@@ -63,10 +55,35 @@ def main():
             print(f"Assignments:\n{assignments}")
     else:
         print("Unsatisfiable")
-    
     # print stats
     if args.show_stats:
         print(STATS)
+
+def solve_input(input: str) -> bool:
+    """Solves SAT for a given input file with a CNF in dimacs and measures stats.
+
+    Parameters
+    ----------
+    input : str
+        The dimacs encoded file.
+
+    Returns
+    -------
+    bool
+        True if formula is satisfiable, False otherwise.
+    """
+    
+    with open(input, "r") as f:
+        formula = dimacs.read_cnf(f.readlines())
+    global original_formula, assignments, STATS
+    original_formula = formula
+    # solve and measure stuff
+    STATS.start()
+    # now finally do the thing
+    satisfiable = dpll_solver()
+    # stop measuring of stats
+    STATS.stop()
+    return satisfiable
 
 def dpll_solver() -> bool:
     """DPLL with preprocessing.

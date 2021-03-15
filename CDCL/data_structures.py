@@ -1,6 +1,6 @@
 from typing import List, Tuple, Optional
 from collections.abc import Sequence, Collection
-import constants
+import config
 
 def negate(boolean: Optional[bool]):
     """Negates the given extended boolean (None stays None).
@@ -336,6 +336,9 @@ class Trail(Sequence):
     def __getitem__(self, key: int) -> DecisionLevel:
         return self.trail[key]
     
+    def __iter__(self):
+        return iter(self.trail)
+    
     def decide(self, assignment: Assignment):
         self.trail.append(DecisionLevel(assignment))    # create a new decision level with the decision
     
@@ -397,8 +400,8 @@ class VSIDS:
 
         self.conflicts -=- 1    # chad town
         # if we reached the max number of conflicts, we crank that boi up
-        if self.conflicts >= constants.VSIDS_CONFLICTS_UNTIL_DECAY:
-            self.b /= constants.VSIDS_DECAY
+        if self.conflicts >= config.VSIDS_CONFLICTS_UNTIL_DECAY:
+            self.b /= config.VSIDS_DECAY
             self.conflicts = 0
         # if our b has reached a limit where we might fear overflows (probably not 2**10, but better safe than sorry), we scale the whole thing
         if self.b >= 2**10:
