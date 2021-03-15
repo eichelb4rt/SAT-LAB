@@ -78,6 +78,9 @@ class Assignment:
         self.var = assignment[0]
         self.value = assignment[1]
         self.decision_level = decision_level
+    
+    def __str__(self):
+        return str((self.var, self.value))
 
 class Assignments(Sequence):
     """Partial assignment with fast access times.
@@ -255,7 +258,7 @@ class Assignments(Sequence):
             The string representation.
         """
 
-        return str(self.assignment_view)
+        return str([str(assignment) for assignment in self.assignment_view])
 
 class Propagation:
     """A propagated assignment. Includes the assignment itself and a reason clause.

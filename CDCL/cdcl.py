@@ -47,11 +47,16 @@ def main():
     )
     args = parser.parse_args()
     with open(args.input, "r") as f:
-        formula = dimacs.read_cnf(f.readlines())    # still in form List[List[int]]
-    global original_formula, assignments
+        lines = f.readlines()
+        formula = dimacs.read_cnf(lines)    # still in form List[List[int]]
+        n = dimacs.get_variables_in_dimacs(lines)   # number of variables
+    global original_formula, assignments, vsids
     # convert to form Formula
     clauses = [Clause(clause) for clause in formula]
     original_formula = Formula(clauses)
+    # instantiate assignments and vsids
+    assignments = Assignments(n)
+    vsids = VSIDS(n)
     # solve and measure stuff
     if args.show_stats:
         STATS.start()
