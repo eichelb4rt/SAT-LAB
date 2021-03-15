@@ -57,6 +57,9 @@ class Formula:
     def __iter__(self):
         return iter(self.original_clauses + self.learned_clauses)
     
+    def __str__(self):
+        return f"original: {str([[literal for literal in clause] for clause in self.original_clauses])}\nlearned: {str([[literal for literal in clause] for clause in self.learned_clauses])}"
+    
     def learn(self, clause: Clause):
         self.learned_clauses.append(clause)
 

@@ -604,7 +604,7 @@ def decide(var: int):
 
     global assignments, trail # we're using these global variables
     value = variable_decision_heuristic(var)    # what value should be assigned to the variable
-    assignment = Assignment((var, value), trail.decision_level)   # assignment as the type Assignment
+    assignment = Assignment((var, value), trail.decision_level + 1)   # assignment as the type Assignment - will be on a new decision level!
     assignments.assign(assignment)  # add the assignment to the list of assignments
     trail.decide(assignment)    # add it to the trail
     STATS.decide()  # gotta count those decisions
