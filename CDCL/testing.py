@@ -5,7 +5,7 @@ from data_structures import Formula, Clause, Assignments, Assignment, Trail, VSI
 import cdcl
 
 # global variables
-clauses_array_form = [[-1, -2], [-1, 2], [1, -2], [1, 2]]
+clauses_array_form = [[-1, -2, -3], [-1, 2, -3], [1, -2, -3], [1, 2, -3], [-1, -2, 3], [-1, 2, 3], [1, -2, 3], [1, 2, 3]]
 cdcl.assignments = Assignments(4)
 cdcl.vsids = VSIDS(4)
 cdcl.original_formula = Formula([Clause(literals) for literals in clauses_array_form])

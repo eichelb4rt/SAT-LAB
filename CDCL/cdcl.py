@@ -479,7 +479,7 @@ def select_variable() -> int:
 
     global vsids, assignments
     max_index = 0   # index of the variable with the max counter
-    max_counter = 0 # max counter
+    max_counter = -1 # max counter
     for index, counter in enumerate(vsids.counters):
         # if there's a higher scoring variable that is not assigned yet, we prefer it
         if counter > max_counter and assignments[index + 1] is None:    # index (x) -> variable (x + 1)
