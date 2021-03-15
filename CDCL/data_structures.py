@@ -44,7 +44,19 @@ class Clause(Sequence):
     def __str__(self):
         return str(self.literals)
 
-class Formula: List[Clause]
+class Formula:
+    """The formula is a conjuction of clauses. It can be divided into orginial clauses and learned clause.
+    """
+
+    def __init__(self, clauses: List[Clause]):
+        self.original_clauses = clauses
+        self.learned_clauses = []
+    
+    def __iter__(self):
+        return iter(self.original_clauses + self.learned_clauses)
+    
+    def learn(self, clause: Clause):
+        self.learned_clauses.append(clause)
 
 class Assignment:
     """Single variable assignment.
@@ -80,6 +92,8 @@ class Assignments(Sequence):
 
         self.values = [None] * n  # generate 'unassigned' for every variable.
         self.decision_levels = [None] * n   # generate 'no decision level yet' for every variable.
+        self.reasons = [None] * n   # generate 'no reason clause' for every variable
+        self.last_assignments = [None] * n    # this is for the decision heuristic. This stays even if we unassign variables.
         # Note that the value for every variable x is stored in self.assignments[x-1] since the variables start at 1 and the array starts/list starts at 0.
     
     @property
@@ -144,17 +158,69 @@ class Assignments(Sequence):
         else:
             return negate(self[-literal])
     
-    def assign(self, assignment: Assignment):
+    def decision_level(self, variable: int) -> Optional[int]:
+        """Returns the decision level of the assignment of a given variable.
+
+        Parameters
+        ----------
+        variable : int
+            The given variable.
+
+        Returns
+        -------
+        Optional[int]
+            The decision level of the variable, None if it's unassigned.
+        """
+
+        return self.decision_levels[variable - 1]   # variable (n) is stored at index (n-1)
+    
+    def reason(self, variable: int) -> Optional[Clause]:
+        """Returns the reason of the assignment for a given variable.
+
+        Parameters
+        ----------
+        variable : int
+            The given variable.
+
+        Returns
+        -------
+        Optional[Clause]
+            The reason for the assignment of the variable. None if unassigned or decision.
+        """
+
+        return self.reasons[variable - 1]   # variable (n) is stored at index (n-1)
+    
+    def last_assignment(self, variable: int) -> Optional[bool]:
+        """Returns the last value that the variable was assigned.
+
+        Parameters
+        ----------
+        variable : int
+            The given variable.
+
+        Returns
+        -------
+        Optional[bool]
+            The last value that the variable was assigned.
+        """
+
+        return self.last_assignments[variable - 1]  # variable (n) is stored at index (n-1)
+    
+    def assign(self, assignment: Assignment, reason: Clause = None):
         """Applies a given assignment.
 
         Parameters
         ----------
         assignment : Assignment
             The given assignment.
+        reason : Clause, optional
+            The reason for the given assignment, by default None    (for decisions)
         """
 
         self.values[assignment.var - 1] = assignment.value # variable (n) is stored at index (n-1)
+        self.last_assignments[assignment.var - 1] = assignment.value # update last assignment
         self.decision_levels[assignment.var - 1] = assignment.decision_level
+        self.reasons[assignment.var - 1] = reason
     
     def __delitem__(self, variable: int):
         """Unassigns a given variable.
@@ -167,6 +233,7 @@ class Assignments(Sequence):
 
         self.values[variable - 1] = None   # see note in __init__
         self.decision_levels[variable - 1] = None
+        self.reasons[variable - 1] = None
     
     def __iter__(self):
         """Returns iterator over assignment view (See method assignment_view).
@@ -221,42 +288,21 @@ class DecisionLevel:
         assignments.append(self.decision)
         return assignments
     
-    def reason(self, assignment: Assignment) -> Clause: # TODO: make more efficient (for example put it in assignments)
-        """Returns the reason for a given propagation assignment.
-
-        Parameters
-        ----------
-        assignment : Assignment
-            The given assignment (was propagated, decisions do not have reasons).
+    def get_latest_assignment(self) -> Assignment:
+        """Gets the latest assignment applied on this decision level.
 
         Returns
         -------
-        Clause
-            The reason clause for the given assignment.
+        Assignment
+            The latest applied assignment.
         """
 
-        # look through the propagations on this decision level and return the reason for the found assignment
-        for propagation in self.propagations:
-            if propagation.assignment.var == assignment.var:    # basically checks if we found the same assignment (there's only one assignment with that variable)
-                return propagation.reason
-    
-    def var_reason(self, var: int) -> Clause:
-        """Basically the same as reason(assignment), just that we only have to pass the variable. That may be more convenient sometimes.
-
-        Parameters
-        ----------
-        var : int
-            The variable that was assigned.
-
-        Returns
-        -------
-        Clause
-            The reason clause for the assignment for the variable.
-        """
-
-        for propagation in self.propagations:
-            if propagation.assignment.var == var:    # basically checks if we found the same assignment (there's only one assignment with that variable)
-                return propagation.reason
+        # if there are no propagations, it's the decision
+        if len(self.propagations) == 0:
+            return self.decision
+        # get the last propagation
+        propagation = self.propagations[len(self.propagations) - 1]
+        return propagation.assignment
 
 class Trail(Sequence):
     """A trail of the decisions. Is divided into decision levels.
@@ -299,3 +345,60 @@ class Trail(Sequence):
         """
 
         self.trail[self.decision_level].add_propagation(assignment, reason)
+    
+    def backtrack(self, level: int):
+        """Backtracking to the given level.
+
+        Parameters
+        ----------
+        level : int
+            The given level.
+        """
+
+        self.trail = self.trail[:level + 1]   # keeps every decision level before level, removes everything else
+class VSIDS:
+    """Class that manages VSIDS variable selection.
+    """
+
+    c_decay = 0.5   # all variables should be multiplied with c after j conflicts
+    j = 1000
+
+    def __init__(self, n: int):
+        """Initiates the VSIDS data structure for variable selection.
+
+        Parameters
+        ----------
+        n : int
+            The number of variables.
+        """
+
+        self.b = 1.0  # instead of multiplying all counters with c after a while, we'll just divide b by c and add it to the counter all the time instead of 1 (MiniSat approach)
+        self.counters = [0.0] * n   # note that every variable (x) is stored at index (x - 1)
+        self.conflicts = 0  # number of conflicts
+        # we could now sort a list of variables we want to assign next, but i'm too lazy
+    
+    def touch(self, variable: int):
+        """To be called when a variable is 'touched' in a conflict.
+
+        Parameters
+        ----------
+        variable : int
+            The touched variable.
+        """
+
+        self.counters[variable] -=- self.b  # way cooler than +=, fancy schmancy time
+    
+    def conflict(self):
+        """Increment the conflict counter.
+        """
+
+        self.conflicts -=- 1    # chad town
+        # if we reached the max number of conflicts, we crank that boi up
+        if self.conflicts >= j:
+            self.b /= c_decay
+            self.conflicts = 0
+        # if our b has reached a limit where we might fear overflows (probably not 2**10, but better safe than sorry), we scale the whole thing
+        if self.b >= 2**10:
+            for index, counter in enumerate(self.counters):
+                self.counter[index] = counter / self.b
+                self.b = 1

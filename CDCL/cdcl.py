@@ -8,12 +8,13 @@ from typing import List, Tuple, Optional
 # add the 2-SAT directory to the path so i can import read_dimacs and more already existing features from it
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"{os.path.sep}global_libs")
 import read_dimacs as dimacs    # no vscode, you're wrong. This is not an unresolved import. fucker.
-from data_structures import Clause, Formula, Assignment, Assignments, Trail
+from data_structures import Clause, Formula, Assignment, Assignments, Trail, VSIDS
 
 # global variables
 assignments: Assignments
 original_formula: Formula
 trail: Trail
+vsids: VSIDS
 
 def main():
     parser = argparse.ArgumentParser()
@@ -57,16 +58,37 @@ def cdcl_solver() -> bool:
         True if the global formula is satisfiable, false if not.
     """
 
+    global original_formula
     # pre-processing
+    # trivial: empty clause contained?
+    for clause in original_formula:
+        if len(clause) == 0:
+            return False
     # UP
-    # TODO: UP
-    # check for TERMINATION
-    if is_empty_formula_mf():
-        return True
-    if empty_set_contained_mf():
+    if conflict := propagate():
         return False
+    # did this already satisfy?
+    if is_empty_formula():
+        return True
     # the real thing
     return cdcl_preprocessed()
+
+def is_empty_formula() -> bool:
+    """Determines whether a formula f is empty.
+
+    Returns
+    -------
+    bool
+        True if empty, False if not.
+    """
+
+    global original_formula, assignments  # using global assignments and formula
+    f = copy(original_formula)
+    # remove clauses that were made true by the assignment
+    for assignment in assignments.assignment_view:
+        removes_clause_from_formula = -1 * assignment.var if assignment.value == False else assignment.var    # == False for readability
+        f = [clause for clause in f if not removes_clause_from_formula in clause]   # that's all the clauses that do not contain the literal that removes them from the formula
+    return len(f) == 0
 
 def cdcl_preprocessed() -> bool:
     """CDCL assuming the formula was preprocessed
@@ -76,13 +98,12 @@ def cdcl_preprocessed() -> bool:
     bool
         True if the global formula is satisfiable, false if not.
     """
-    global assignments, original_formula    # we're using these global variables
-    decision_level = 0
-    while var := get_var_mf():  # while we find new variables
-        decision_level -=- 1    # chad += 1
-        decide(var) # adds assignment to trail
+    global assignments, original_formula, trail    # we're using these global variables
+
+    while var := select_variable():  # while we find new variables
+        decide(var) # decide the variable and do all the dirty work that comes with it
         while conflict_clause := propagate():  # while we find new conflicts (propagate returns conflict clause or None)
-            if decision_level == 0:
+            if trail.decision_level == 0:
                 return False    # UNSAT
             learned_clause = analyse_conflict(conflict_clause)  # the clause that is supposed to be learned from the derived conflict
             learn(learned_clause)   # learn the clause
@@ -105,13 +126,15 @@ def propagate() -> Optional[Clause]:
         The conflict clause, None if no conflict happened.
     """
 
-    global assignments
-    latest_decision = trail[trail.decision_level].decision
-    unit_clauses = get_new_unit_clauses(latest_decision)
+    global assignments, trail
+    highest_decision_level = trail.decision_level
+    latest_assignment = (trail[highest_decision_level]).get_latest_assignment()
+    unit_clauses = get_new_unit_clauses(latest_assignment)
     # propagate until a conflict is derived or we have no unit clauses left
     while len(unit_clauses) != 0:
         unit_clause = unit_clauses[0]   # take the first unit clause
         # figure out the only unassigned literal in the unit clause
+        unit = None
         for literal in unit_clause.watched_literals:
             if assignments.value(literal) is None:
                 unit = literal  # unit is the only unassigned literal in the clause
@@ -124,7 +147,7 @@ def propagate() -> Optional[Clause]:
         value = True if unit > 0 else False
         new_assignment = Assignment((var, value), trail.decision_level)
         # apply the assignment and add it to the trail - the unit clause is the reason for the assignment.
-        assignments.assign(new_assignment)  # apply the assignment
+        assignments.assign(new_assignment, unit_clause)  # apply the assignment
         trail.add_propagation(new_assignment, unit_clause)  # add it to the trail
         # check if a conflict was derived anywhere (a conflict can only be derived in unit clauses)
         for possible_conflict_clause in unit_clauses:
@@ -256,6 +279,29 @@ def backtrack(clause: List[int]):
         The learned clause.
     """
 
+    global assignments, trail
+    # if the clause is a unit clause, we instantly backtrack to the 0th decision level and satisfy the unit clause
+    if len(clause) == 1:
+        # backtrack to 0
+        backtrack_to(0)
+        # satisfy the unit clause
+        unit = clause[0]    # the only literal in the clause
+        # figure out the assignment to satisfy the unit
+        var = abs(unit)
+        value = True if unit > 0 else False
+        # assign the literal
+        new_assignment = Assignment((var, value), trail.decision_level)
+        assignments.assign(new_assignment, clause)  # apply the assignment
+        trail.add_propagation(new_assignment, clause)  # add it to the trail
+    else:
+        # find out the asserting level: the max decision level that includes learned literals. The highest decision level is excluded!
+        max_level = 0
+        for literal in clause:
+            level = assignments.decision_level(abs(literal))
+            if level > max_level and level != trail.decision_level:
+                max_level = level
+        backtrack_to(level)
+
 def backtrack_to(level: int):
     """Changes trail and decision level for backtracking to the given level.
 
@@ -268,11 +314,11 @@ def backtrack_to(level: int):
     global assignments, trail
 
     # unassign variables
-    for decision_level in trail[level:]:    # includes level , level + 1 , ... , current decision level
+    for decision_level in trail[level + 1:]:    # includes level + 1 , ... , highest decision level
         for assignment in decision_level.assignments: # the assignments on the decision level
             del assignments[assignment.var] # unassign the variable
     # reset trail
-    trail = trail[:level]   # keeps every decision level before level, removes everything else
+    trail.backtrack(level)
 
 
 
@@ -288,6 +334,9 @@ def learn(clause: List[int]):
     clause : List[int]
         The clause that is supposed to be learned.
     """
+
+    global original_formula
+    original_formula.learn(clause)
 
 def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for performance (linked lists) and maybe an implication graph
     """Analyses the current conflict.
@@ -308,9 +357,9 @@ def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for p
     #variables_on_decision_level = [assignment.var for assignment in assignments_on_decision_level]
     cut = conflict_clause   # initiate the cut with the conflict clause
     conflict_zone = []  # the variables in the conflict zone of the cut
-    imp_graph = implication_graph_on_decision_level()   # the implication graph only on the decision level
+    imp_graph = implication_graph_on_decision_level()   # the implication graph only on the highest decision level
     dec_vars = variables_on_decision_level(cut, trail.decision_level)   # dec_vars is now the list of variables on the last decision level (in the cut)
-    while len(dec_vars) > 1:    # while there is more than 1 literal on the current decision level in the current clause, keep going
+    while len(dec_vars) > 1:    # while there is more than 1 literal on the highest decision level in the current clause, keep going
         pivot = dec_vars[0] # the first variable in the list will be our pivot
         # now check if the pivot can reach any other variables in the cut
         # we do this with DF search:
@@ -334,14 +383,14 @@ def analyse_conflict(conflict_clause: Clause) -> Clause:  # TODO: optimise for p
             dec_vars.remove(pivot)
             continue    # and look at the next variable - continue is actually not needed here, just for readability
         else:   # we can't reach any variables outside the cut if we add this to the cut, so let's just do that shall
-            reason = trail[trail.decision_level].var_reason(pivot)  # reason clause for assignment of pivot
+            reason = assignments.reason(pivot)  # reason clause for assignment of pivot
             cut = resolve(cut, reason, pivot)    # resolve the reason with the cut
-            new_decision_variables = variables_on_decision_level(reason, trail.decision_level)  # the new variables that are now in the cut on the decision level
+            new_decision_variables = variables_on_decision_level(reason, trail.decision_level)  # the new variables that are now in the cut on the highest decision level
             new_decision_variables = [variable for variable in new_decision_variables if variable not in dec_vars]    # only add actually new variables. we do not want duplicates.
             dec_vars += new_decision_variables  # add the new decision variables
             dec_vars.remove(pivot)  # remove the expanded variable from the variables to be expanded
             conflict_zone.append(pivot) # the pivot is now in the conflict zone
-    # we resolved until there was only 1 literal on decision level left. This is the 1UP. This is the way.
+    # we resolved until there was only 1 literal on the highest decision level left. This is the 1UP. This is the way.
     return cut
 
 def resolve(a: Clause, b: Clause, pivot: int) -> Clause:
@@ -367,7 +416,7 @@ def resolve(a: Clause, b: Clause, pivot: int) -> Clause:
     return Clause(literals)
 
 def implication_graph_on_decision_level() -> dict:
-    """Returns the implication graph on the decision level (only the latest decision level!).
+    """Returns the implication graph on the highest decision level (only the highest decision level!).
 
     Returns
     -------
@@ -385,7 +434,7 @@ def implication_graph_on_decision_level() -> dict:
     propagations = trail[trail.decision_level].propagations # only propagations have predecessors
     for propagation in propagations:
         # the direct predecessor of a variable is every variable that's in the reason clause except for the assignment var itself
-        predecessors = variables_on_decision_level(propagation.reason, trail.decision_level) # we only care for variables on the decision level
+        predecessors = variables_on_decision_level(propagation.reason, trail.decision_level) # we only care for variables on the highest decision level
         predecessors.remove(propagation.assignment.var) # except for the assignment var itself
         # append assignment var to the lists of the predecessor
         for predecessor in predecessors:
@@ -414,29 +463,29 @@ def variables_on_decision_level(clause: Clause, level: int) -> List[int]:
     return [abs(literal) for literal in clause if abs(literal) in variables_on_level]
 
 
-def reason(assignment: Assignment) -> Clause:
-    """Returns the reason for a given propagation assignment.
-
-    Parameters
-    ----------
-    assignment : Assignment
-        The given assignment (was propagated, decisions do not have reasons).
-
-    Returns
-    -------
-    Clause
-        The reason clause for the given assignment.
-    """
-
-    global trail
-    return trail[assignment.decision_level].reason(assignment)  # return the reason for the assignment on the decision level for the assignment
-
-
 
 # ===========================================================================
 # ================================ decisions ================================
 # ===========================================================================
 
+def select_variable() -> int:
+    """Decides which variable to select for a decision.
+
+    Returns
+    -------
+    int
+        The selected variable.
+    """
+
+    global vsids, assignments
+    max_index = 0   # index of the variable with the max counter
+    max_counter = 0 # max counter
+    for index, counter in enumerate(vsids.counters):
+        # if there's a higher scoring variable that is not assigned yet, we prefer it
+        if counter > max_counter and assignments[index + 1] is None:    # index (x) -> variable (x + 1)
+            max_index = index
+            max_counter = counter
+    return max_index + 1   # index (x) -> variable (x + 1)
 
 def decide(var: int):
     """Decides the value of a given variable and adds the assignment to the trail.
@@ -467,77 +516,12 @@ def variable_decision_heuristic(var: int) -> bool:
         The suggested value for the variable assignment.
     """
 
-    return True
-
-
-# ====================================================================================
-# ================================ mf stuff from DPLL ================================
-# ====================================================================================
-
-def get_var_mf() -> Optional[int]: # mf = memory friendly, obviously
-    """Gets a variable from the formula.
-
-    Returns
-    -------
-    Optional[int]
-        Returns a variable from the formula, None if none was found.
-    """
-
-    global original_formula, assignments
-    # get all the variables in the original formula
-    variables = []
-    for clause in original_formula:
-        for literal in clause:
-            var = abs(literal)
-            if not var in variables:
-                variables.append(var)
-    # substract the ones that were already assigned
-    assigned_vars = [var for (var, assigned_value) in assignments]
-    variables = [var for var in variables if not var in assigned_vars]
-    # skinny little boy, hasn't even got variables in him
-    if len(variables) == 0:
-        return None
-    return variables[0]
-
-def empty_set_contained_mf() -> bool:   # mf = memory friendly, obviously
-    """Determines whether the formula with the applied assignment contains an empty clause.
-
-    Returns
-    -------
-    bool
-        True if empty set is found.
-    """
-
-    global original_formula, assignments
-    # idea: return true if any of the original clauses are a subset of the falsified literals
-    falsified_literals = set([-var if assigned_value == True else var for var, assigned_value in assignments])   # make a set containing the literals that are falsified by the assignments
-    for clause in original_formula:
-        if set(clause).issubset(falsified_literals):    # True if clauses are a subset of the falsified literals
-            return True
-    # none of the clauses are a subset of the falsified literals
-    return False
-
-def is_empty_formula_mf() -> bool:  # mother fucker
-    """Determines whether a formula f is empty.
-
-    Parameters
-    ----------
-    f : List[List[int]]
-        The given formula f.
-
-    Returns
-    -------
-    bool
-        True if empty, False if not.
-    """
-
-    global original_formula, assignments  # using global assignments and formula
-    f = copy(original_formula)
-    # remove clauses that were made true by the assignment
-    for var, assigned_value in assignments:
-        removes_clause_from_formula = -1 * var if assigned_value == False else var    # same here
-        f = [clause for clause in f if not removes_clause_from_formula in clause]   # that's all the clauses that do not contain the literal that removes them from the formula
-    return len(f) == 0
+    global assignments
+    # we want to maintain the last assignment
+    if assignments.last_assignment(var) is None:
+        return True
+    else:
+        return assignments.last_assignment(var)
 
 if __name__ == "__main__":
     main()
