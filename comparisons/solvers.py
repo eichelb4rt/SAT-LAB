@@ -113,4 +113,4 @@ class TwoSatSolver(Solver):
     def stats_run(self) -> TwoSatStats:
         return two_sat.STATS
 
-solvers = [DPLLSolver(), DPLLMFSolver(), CDCLSolver()]
+solvers = [CDCLSolver()]
