@@ -63,6 +63,18 @@ def main():
     if args.show_stats:
         print(STATS)
 
+def override_config(new_config):
+    """Overrides the  config.
+
+    Parameters
+    ----------
+    new_config : module
+        The config that overrides the default config.
+    """
+
+    global config
+    config = new_config
+
 def solve_input(input: str) -> bool:
     """Solves SAT for a given input file with a CNF in dimacs and measures stats.
 
@@ -81,7 +93,12 @@ def solve_input(input: str) -> bool:
         lines = f.readlines()
         formula = dimacs.read_cnf(lines)    # still in form List[List[int]]
         n = dimacs.get_variables_in_dimacs(lines)   # number of variables
-    global original_formula, assignments, vsids, STATS
+    global original_formula, assignments, vsids, STATS, trail, restart_counter, conflict_counter_restarts
+    # initiate stuff
+    trail = Trail()
+    restart_counter = 0
+    conflict_counter_restarts = 0
+    STATS = CDCLStats()
     # convert to form Formula
     clauses = [Clause(clause) for clause in formula]
     original_formula = Formula(clauses)

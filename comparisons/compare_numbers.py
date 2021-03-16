@@ -1,6 +1,8 @@
+#!/bin/python3
+# SHEBANG
+
 import os
 from solvers import solvers
-import matplotlib.pyplot as plt
 
 cnfs_folder = "../random-cnf/out/"
 files = os.listdir(cnfs_folder)

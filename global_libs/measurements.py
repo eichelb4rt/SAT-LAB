@@ -141,6 +141,11 @@ class Decisions(Counter):
     def format_name(self) -> str:
         return "Number of Decisions"
 
+class PureLiterals(Counter):
+    @property
+    def format_name(self) -> str:
+        return "Number of Pure Literals"
+
 class Conflicts(Counter):
     @property
     def format_name(self) -> str:

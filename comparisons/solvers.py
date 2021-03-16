@@ -14,6 +14,8 @@ import cdcl
 import dpll
 import dpll_mf
 import two_sat
+import config_a
+import config_b
 
 class Solver(ABC):
 
@@ -65,7 +67,7 @@ class Solver(ABC):
             The StatsAgent.
         """
 
-class CDCLSolver(Solver):
+class CDCLSolverDefault(Solver):
     @property
     def name(self) -> str:
         return "CDCL"
@@ -76,6 +78,24 @@ class CDCLSolver(Solver):
     @property
     def stats_run(self) -> CDCLStats:
         return cdcl.STATS
+
+class CDCLSolverA(CDCLSolverDefault):
+    @property
+    def name(self) -> str:
+        return "CDCL - Config A"
+
+    def solve(self, input: str) -> bool:
+        cdcl.override_config(config_a)
+        return cdcl.solve_input(input)
+
+class CDCLSolverB(CDCLSolverDefault):
+    @property
+    def name(self) -> str:
+        return "CDCL - Config B"
+
+    def solve(self, input: str) -> bool:
+        cdcl.override_config(config_b)
+        return cdcl.solve_input(input)
 
 class DPLLMFSolver(Solver):
     @property
@@ -112,5 +132,3 @@ class TwoSatSolver(Solver):
     @property
     def stats_run(self) -> TwoSatStats:
         return two_sat.STATS
-
-solvers = [CDCLSolver()]

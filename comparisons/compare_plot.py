@@ -1,14 +1,24 @@
+#!/bin/python3
+# SHEBANG
+
 import os
-from solvers import solvers
-import matplotlib.pyplot as plt
+from to_compare import solvers
+from matplotlib import pyplot as plt
 
 cnfs_folder = "../random-cnf/out/"
 files = os.listdir(cnfs_folder)
 
 for solver in solvers:
+    print("================================================================")
+    print(solver.name)
+    print("================================================================")
     for file in files:
         path = cnfs_folder + file
-        solver.solve(path)
+        print("================================")
+        print(file)
+        print("================================")
+        print(solver.solve(path))
+        print(solver.stats_run)
         solver.stop_time()
 # now plot that shit
 x_axis = range(len(files))

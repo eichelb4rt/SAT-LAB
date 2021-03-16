@@ -15,7 +15,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + f"
 from two_sat import unit_propagation, apply_assignment
 
 # global variables the algorithm uses
-assignments = []
+assignments_view = []   # [(var, bool)] - order of assignment
+assignments = []    # fast access variable assignment - variable (x) stored at index (x-1)
 original_formula = []
 # global variables for stats
 STATS = DPLLStats()
@@ -52,7 +53,7 @@ def main():
     if satisfiable:
         print("Satisfiable")
         if args.show_assignments:
-            print(f"Assignments:\n{assignments}")
+            print(f"Assignments:\n{assignments_view}")
     else:
         print("Unsatisfiable")
     # print stats
@@ -74,9 +75,13 @@ def solve_input(input: str) -> bool:
     """
     
     with open(input, "r") as f:
-        formula = dimacs.read_cnf(f.readlines())
-    global original_formula, assignments, STATS
+        lines = f.readlines()
+        formula = dimacs.read_cnf(lines)
+        n = dimacs.get_variables_in_dimacs(lines)   # number of variables
+    global original_formula, assignments_view, assignments, STATS
     original_formula = formula
+    assignments = [None] * n
+    assignments_view = []
     # solve and measure stuff
     STATS.start()
     # now finally do the thing
@@ -111,7 +116,7 @@ def dpll_mf() -> bool: # mf = memory friendly, obviously
     bool
         True if the global formula is satisfiable, false if not.
     """
-    global assignments, original_formula, STATS   # we're using these global variables
+    global assignments, assignments_view, original_formula, STATS   # we're using these global variables
     unit_propagation_mf()   # unit propagation
     eliminate_pure_literals_mf()    # eliminate pure literals
     # check for TERMINATION by Arnold Schwarzenegger
@@ -122,19 +127,30 @@ def dpll_mf() -> bool: # mf = memory friendly, obviously
     
     var = get_var_mf()  # Oh i'd like some sweet variables now. Wanna go get some?
     # recursion go brr
-    entry_point = len(assignments)  # entry point is the index of the next variable to be assigned
-    assignments.append((var, False))    # assign(var, 0)
+    entry_point = len(assignments_view)  # entry point is the index of the next variable to be assigned
+    assignments_view.append((var, False))    # assign(var, 0)
+    assignments[var - 1] = False
     STATS.decide()  # we decided something and we're gonna stick with it!
     if dpll_mf():
         return True
-    assignments = assignments[:entry_point] # unassign(x)
+    backtrack(entry_point)
     # ite, let's just try it again, shall we?
-    assignments.append((var, True))    # assign(var, 1)
+    assignments_view.append((var, True))    # assign(var, 1)
+    assignments[var - 1] = True
     STATS.decide()  # ok maybe we won't stick with all of our decisions
     if dpll_mf():
         return True
-    assignments = assignments[:entry_point] # unassign(x)
+    backtrack(entry_point)
     return False
+
+def backtrack(entry_point: int):
+    """Backtracks to the entry point. Unassigns every variable after (included) the entry point.
+    """
+
+    global assignments, assignments_view
+    for assignment in assignments_view[entry_point:]:
+        assignments[assignment[0] - 1] = None
+    assignments_view = assignments_view[:entry_point] # unassign(x)
 
 def get_var_mf() -> Optional[int]: # mf = memory friendly, obviously
     """Gets a variable from the formula.
@@ -142,55 +158,71 @@ def get_var_mf() -> Optional[int]: # mf = memory friendly, obviously
     Returns
     -------
     Optional[int]
-        Returns a variable from the formula, None if none was found.
+        Returns an unassigned variable from the formula, None if none was found.
     """
 
-    global original_formula, assignments
-    # get all the variables in the original formula
-    variables = []
-    for clause in original_formula:
-        for literal in clause:
-            var = abs(literal)
-            if not var in variables:
-                variables.append(var)
-    # substract the ones that were already assigned
-    assigned_vars = [var for (var, assigned_value) in assignments]
-    variables = [var for var in variables if not var in assigned_vars]
-    # skinny little boy, hasn't even got variables in him
-    if len(variables) == 0:
-        return None
-    return variables[0]
+    global original_formula, assignments_view
+    for index, value in enumerate(assignments):
+        if value is None:
+            return index + 1
+    return None
 
 def unit_propagation_mf():  # mf = memory friendly, obviously
     """Applies unit propagation and adds the assigned assignments to the global list of assignments.
     """
 
-    global original_formula, assignments, STATS # gonna use em both like every time
-    local_formula = apply_assignments(original_formula, assignments)    # apply assignments (uses a deep copy)
-    new_assignments = unit_propagation(local_formula, STATS)[1] # do UP on the local formula - gotta pass our own stats agent
-    for new_assignment in new_assignments:  # append the assignments assigned in UP
-        assignments.append(new_assignment)
+    global original_formula, assignments_view, assignments, STATS # gonna use em both like every time
+    while unit_clause := get_unit_clause():
+        # get the unit
+        unit = None
+        for literal in unit_clause:
+            var = abs(literal)
+            index = var - 1
+            if assignments[index] is None:
+                unit = literal
+                break
+        # assignment that satisfied unit literal
+        value = True if literal > 0 else False
+        var = abs(literal)
+        index = var - 1
+        new_assignment = (var, value)
+        # apply the assignment
+        assignments_view.append(new_assignment)
+        assignments[index] = value
+        STATS.propagate()
 
-def apply_assignments(f: List[List[int]], assignments: List[Tuple[int, bool]]) -> List[List[int]]:
-    """Applies a list of assignments to a given formula f.
-
-    Parameters
-    ----------
-    f : List[List[int]]
-        The given formula f.
-    assignments : List[Tuple[int, bool]]
-        The list of assignments.
+def get_unit_clause() -> Optional[List[int]]:
+    """Gets a unit clause.
 
     Returns
     -------
-    List[List[int]]
-        The formula f with all the assignments applied.
+    Optional[List[int]]
+        A unit clause, None if none was found.
     """
 
-    # no deep copy needed (because apply_assignments already uses them)
-    for assignment in assignments:
-        f = apply_assignment(f, assignment) # apply_assignments uses deep copies
-    return f
+    global original_formula
+    for clause in original_formula:
+        if is_unit_clause(clause):
+            return clause
+    return None
+
+def is_unit_clause(clause: List[int]) -> bool:
+    """Returns if a clause is unit or not.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The given clause.
+
+    Returns
+    -------
+    bool
+        True if it is unit, False otherwise.
+    """
+
+    global assignments
+    unassigned_literals = [literal for literal in clause if assignments[abs(literal)-1] is None]
+    return not clause_satisfied_mf(clause) and len(unassigned_literals) == 1
 
 def empty_set_contained_mf() -> bool:   # mf = memory friendly, obviously
     """Determines whether the formula with the applied assignment contains an empty clause.
@@ -201,13 +233,10 @@ def empty_set_contained_mf() -> bool:   # mf = memory friendly, obviously
         True if empty set is found.
     """
 
-    global original_formula, assignments
-    # idea: return true if any of the original clauses are a subset of the falsified literals
-    falsified_literals = set([-var if assigned_value == True else var for var, assigned_value in assignments])   # make a set containing the literals that are falsified by the assignments
+    global original_formula
     for clause in original_formula:
-        if set(clause).issubset(falsified_literals):    # True if clauses are a subset of the falsified literals
+        if clause_empty_set(clause):
             return True
-    # none of the clauses are a subset of the falsified literals
     return False
 
 def is_empty_formula_mf() -> bool:  # mother fucker
@@ -224,28 +253,75 @@ def is_empty_formula_mf() -> bool:  # mother fucker
         True if empty, False if not.
     """
 
-    global original_formula, assignments  # using global assignments and formula
-    f = copy(original_formula)
-    # remove clauses that were made true by the assignment
-    for var, assigned_value in assignments:
-        removes_clause_from_formula = -1 * var if assigned_value == False else var    # same here
-        f = [clause for clause in f if not removes_clause_from_formula in clause]   # that's all the clauses that do not contain the literal that removes them from the formula
-    return len(f) == 0
+    global original_formula
+    for clause in original_formula:
+        if not clause_satisfied_mf(clause):
+            return False
+    return True
+
+def clause_empty_set(clause: List[int]) -> bool:
+    """Returns if the clause is the empty set under the global assignment.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The given clause.
+
+    Returns
+    -------
+    bool
+        True if the clause is an empty set under the global assignment, False otherwise.
+    """
+
+    global assignments
+    for literal in clause:
+        var = abs(literal)
+        value_to_be_falsified = False if literal > 0 else True
+        index = var - 1
+        if assignments[index] != value_to_be_falsified:
+            return False
+    return True
+
+def clause_satisfied_mf(clause: List[int]) -> bool:
+    """Returns if the clause is already satisfied by the global assignment.
+
+    Parameters
+    ----------
+    clause : List[int]
+        The given clause.
+
+    Returns
+    -------
+    bool
+        True if it is satisfied by the given assigment, False otherwise.
+    """
+
+    global assignments
+    for literal in clause:
+        var = abs(literal)
+        value_to_be_satisfied = False if literal < 0 else True
+        index = var - 1
+        if assignments[index] == value_to_be_satisfied:
+            return True
+    return False
 
 def eliminate_pure_literals_mf(): # mf = memory friendly, obviously
     """Adds the assignments for pure literal elimination to the global list of assignments.
     """
 
     # get current formula
-    global assignments
+    global assignments_view, assignments, STATS
     # get assignments for elimination
-    for literal in get_pure_literals_mf():
+    while literal := get_pure_literal_mf():
         var = abs(literal)
         assigned_value = True if literal > 0 else False
-        assignments.append((var, assigned_value))
+        assignments_view.append((var, assigned_value))
+        index = var - 1
+        assignments[index] = assigned_value
+        STATS.count_pure_literal()
 
-def get_pure_literals_mf() -> List[int]:    # mf = memory friendly, obviously
-    """Gets all the pure literal in a given formula f.
+def get_pure_literal_mf() -> List[int]:    # mf = memory friendly, obviously
+    """Gets a pure literal in a given formula f.
 
     Parameters
     ----------
@@ -258,18 +334,28 @@ def get_pure_literals_mf() -> List[int]:    # mf = memory friendly, obviously
         All the pure literals. Empty list if none were found.
     """
 
-    global original_formula, assignments
-    # first make a list of all the literals
-    literals = []
+    global original_formula, assignments_view, assignments
 
-    for clause in original_formula:
-        for literal in clause:
-            if not literal in literals:
-                literals.append(literal)
-    
-    assigned_vars = [var for var, assigned_value in assignments]
-    # now return a list of all the pure literals (a literal is in the list below if it is in the literals list, but it's negated part is not (and it's not already been assigned))
-    return [literal for literal in literals if not -literal in literals and not abs(literal) in assigned_vars]
+    for index, value in enumerate(assignments):
+        var = index + 1
+        if value is None:
+            # positive and negative occurences of the variables
+            occurences = []
+            for clause in original_formula:
+                if not clause_satisfied_mf(clause): # if the literal can actually be seen
+                    literal = None
+                    if var in clause:
+                        literal = var
+                    if -var in clause:
+                        literal = -var
+                    # if var is in clause
+                    if literal:
+                        occurences.append(literal)
+            # now we look if there is only 1 type of occurence
+            for literal in [var, -var]:
+                if literal in occurences and not -literal in occurences:    # if it only occurs in 1 form (pos or neg)
+                    return literal
+    return None
 
 if __name__ == "__main__":
     main()

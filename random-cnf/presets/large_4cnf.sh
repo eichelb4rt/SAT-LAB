@@ -1,7 +1,7 @@
-t=50
-n=10
-c=50
-k=3
+t=5
+n=25
+c=255
+k=4
 
 random_cnf_dir=".."
 random_cnf_tool="$random_cnf_dir/random-cnf.py"

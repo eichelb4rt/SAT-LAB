@@ -12,7 +12,7 @@ dpll_mf="../DPLL_MF/dpll_mf.py"
 cdcl="../CDCL/cdcl.py"
 
 solver="$cdcl"
-preset="small_3cnf"
+preset="medium_4cnf"
 
 preset_folder="$random_cnf_dir/presets"
 preset_executable="$preset_folder/$preset.sh"
@@ -37,8 +37,7 @@ for file in $(ls "$out"); do
     fi
     if [ "$result_lingeling" != "$result_solver" ]; then ((++mistakes)); fi
     # print them both
-    echo "$result_lingeling"
-    echo "$result_solver"
-    echo -e "\n"
+    echo -e "$result_lingeling\t(lingeling)"
+    echo -e "$result_solver\t(my solver)\n"
 done
 echo -e "Satisfiable: $satisfiable_count\nUnsatisfiable: $unsatisfiable_count\nMistakes: $mistakes"

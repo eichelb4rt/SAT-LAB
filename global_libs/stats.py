@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from measurements import Measurement, MeasureTime, PeakMemory, Propagations, Decisions, Conflicts, LearnedClauses, Restarts
+from measurements import Measurement, MeasureTime, PeakMemory, Propagations, Decisions, Conflicts, LearnedClauses, Restarts, PureLiterals
 from tabulate import tabulate
 from typing import List
 
@@ -75,14 +75,25 @@ class SolverStats(StatsAgent):
         self.decisions.increment()
 
 class DPLLStats(SolverStats):
-    pass    # literally just SolverStats
+    def __init__(self):
+        """Initiates agent for dpll.
+        """
+
+        self.pure_literals = PureLiterals()
+        super().__init__([self.pure_literals])
+    
+    def count_pure_literal(self):
+        """Increments the number of pure literals.
+        """
+
+        self.pure_literals.increment()
 
 class TwoSatStats(SolverStats):
     pass    # literally just SolverStats
 
 class CDCLStats(SolverStats):
     def __init__(self):
-        """Initiates agent for dpll.
+        """Initiates agent for cdcl.
         """
 
         self.conflicts = Conflicts()
